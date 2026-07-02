@@ -1,0 +1,36 @@
+{
+  "name": "persona-ai",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "dotenvx run -- tsx watch src/server.ts",
+    "build": "tsc",
+    "prestart": "npm run build",
+    "start": "dotenvx run -- node dist/server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@dotenvx/dotenvx": "^2.0.0",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "google-auth-library": "^10.9.0",
+    "ioredis": "^5.11.1",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.7.3",
+    "openai": "^6.45.0"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^26.1.0",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  }
+}
