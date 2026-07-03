@@ -23,7 +23,12 @@ import {
 } from "../service/youtube/videoSelection.js";
 import { embedVideoTranscript } from "../service/ingestion/embedVideo.js";
 import { normalizePersonaLanguage } from "../service/persona/language.js";
-import { getYoutubeTranscript } from "../service/youtube.js";
+import {
+  fetchTranscriptsFromIoApi,
+  getYoutubeTranscript,
+  isTranscriptIoConfigured,
+  type TranscriptSegment,
+} from "../service/youtube.js";
 import type { ICreatorDocument } from "../models/Creator.js";
 
 const MAX_ATTEMPTS = 3;
@@ -43,7 +48,9 @@ async function handleJobFailure(
       $set: {
         status: CreatorRequestStatus.PENDING,
         error: { code, message },
-        "processing.nextRetryAt": new Date(Date.now() + getRetryDelayMs(attempts)),
+        "processing.nextRetryAt": new Date(
+          Date.now() + getRetryDelayMs(attempts),
+        ),
       },
     });
     return;
@@ -62,6 +69,7 @@ async function fetchAndScoreVideo(params: {
   youtubeVideoId: string;
   creatorName: string;
   handle?: string;
+  segments?: TranscriptSegment[];
 }): Promise<void> {
   const video = await CreatorVideo.findOne({
     creatorId: params.creatorId,
@@ -71,7 +79,12 @@ async function fetchAndScoreVideo(params: {
   if (!video) return;
 
   try {
-    const segments = await getYoutubeTranscript(params.youtubeVideoId);
+    let segments = params.segments;
+    if (segments !== undefined && segments.length === 0) {
+      throw new Error(`No transcript available for video ${params.youtubeVideoId}`);
+    }
+
+    segments ??= await getYoutubeTranscript(params.youtubeVideoId);
     const transcriptText = segments.map((segment) => segment.text).join(" ");
     const wordCount = transcriptText.split(/\s+/).filter(Boolean).length;
     const totalSeconds = segments.at(-1)?.endSeconds ?? 0;
@@ -90,7 +103,9 @@ async function fetchAndScoreVideo(params: {
 
     video.transcript = {
       available: true,
-      source: TranscriptSource.YOUTUBE,
+      source: isTranscriptIoConfigured()
+        ? TranscriptSource.THIRD_PARTY
+        : TranscriptSource.YOUTUBE,
       language: selection.detectedLanguage,
       fetchedAt: new Date(),
       totalSeconds,
@@ -146,8 +161,11 @@ async function fetchAndScoreVideo(params: {
   }
 }
 
-export async function processCreatorRequest(workerId: string): Promise<boolean> {
-  const request = await creatorRequestRepository.claimNextPendingRequest(workerId);
+export async function processCreatorRequest(
+  workerId: string,
+): Promise<boolean> {
+  const request =
+    await creatorRequestRepository.claimNextPendingRequest(workerId);
 
   if (!request) {
     return false;
@@ -182,7 +200,9 @@ export async function processCreatorRequest(workerId: string): Promise<boolean> 
     );
 
     await upsertCreatorVideos(creator._id, channel.channelId, videos);
-    console.log(`[worker] Listed ${videos.length} videos from uploads playlist`);
+    console.log(
+      `[worker] Listed ${videos.length} videos from uploads playlist`,
+    );
 
     const candidates = getTranscriptCandidateVideos(
       videos,
@@ -192,6 +212,18 @@ export async function processCreatorRequest(workerId: string): Promise<boolean> 
       `[worker] Scoring ${candidates.length} transcript candidates (strategy=${creator.ingestion.strategy})`,
     );
 
+    const transcriptMap = isTranscriptIoConfigured()
+      ? await fetchTranscriptsFromIoApi(
+          candidates.map((candidate) => candidate.youtubeVideoId),
+        )
+      : undefined;
+
+    if (transcriptMap) {
+      console.log(
+        `[worker] Fetched ${transcriptMap.size} transcripts via youtube-transcript.io API`,
+      );
+    }
+
     for (const candidate of candidates) {
       await fetchAndScoreVideo({
         creator,
@@ -199,6 +231,7 @@ export async function processCreatorRequest(workerId: string): Promise<boolean> 
         youtubeVideoId: candidate.youtubeVideoId,
         creatorName: channel.name,
         handle: channel.handle,
+        segments: transcriptMap?.get(candidate.youtubeVideoId),
       });
     }
 
@@ -230,13 +263,17 @@ export async function processCreatorRequest(workerId: string): Promise<boolean> 
         `[worker] Fallback selected ${selectedVideoCount} video(s) by rank/views`,
       );
     } else {
-      console.log(`[worker] ${selectedVideoCount} video(s) passed selection threshold`);
+      console.log(
+        `[worker] ${selectedVideoCount} video(s) passed selection threshold`,
+      );
     }
 
     await CreatorVideo.updateMany(
       {
         creatorId: creator._id,
-        youtubeVideoId: { $nin: candidates.map((video) => video.youtubeVideoId) },
+        youtubeVideoId: {
+          $nin: candidates.map((video) => video.youtubeVideoId),
+        },
       },
       {
         $set: {
@@ -247,21 +284,23 @@ export async function processCreatorRequest(workerId: string): Promise<boolean> 
     );
 
     creator.ingestion.selectedVideoCount = selectedVideoCount;
-    creator.ingestion.collectedTranscriptSeconds = await CreatorVideo.aggregate([
-      {
-        $match: {
-          creatorId: creator._id,
-          "selection.selectedForPersona": true,
-          "transcript.available": true,
+    creator.ingestion.collectedTranscriptSeconds = await CreatorVideo.aggregate(
+      [
+        {
+          $match: {
+            creatorId: creator._id,
+            "selection.selectedForPersona": true,
+            "transcript.available": true,
+          },
         },
-      },
-      {
-        $group: {
-          _id: null,
-          totalSeconds: { $sum: "$transcript.totalSeconds" },
+        {
+          $group: {
+            _id: null,
+            totalSeconds: { $sum: "$transcript.totalSeconds" },
+          },
         },
-      },
-    ]).then((rows) => rows[0]?.totalSeconds ?? 0);
+      ],
+    ).then((rows) => rows[0]?.totalSeconds ?? 0);
 
     const languageBreakdown = await CreatorVideo.aggregate([
       {
@@ -277,7 +316,8 @@ export async function processCreatorRequest(workerId: string): Promise<boolean> 
 
     const dominantLanguage = languageBreakdown[0]?._id;
     if (typeof dominantLanguage === "string") {
-      creator.personaConfig.language = normalizePersonaLanguage(dominantLanguage);
+      creator.personaConfig.language =
+        normalizePersonaLanguage(dominantLanguage);
     }
 
     await embedSelectedCreatorVideos(creator);
@@ -299,12 +339,16 @@ export async function processCreatorRequest(workerId: string): Promise<boolean> 
       message: completionMessage,
     });
 
-    console.log(`[worker] Request ${requestId} completed: ${completionMessage}`);
+    console.log(
+      `[worker] Request ${requestId} completed: ${completionMessage}`,
+    );
 
     return true;
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "Creator request processing failed";
+      error instanceof Error
+        ? error.message
+        : "Creator request processing failed";
 
     await handleJobFailure(requestId, attempts, "INGESTION_FAILED", message);
     if (attempts < MAX_ATTEMPTS) {
