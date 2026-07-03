@@ -13,7 +13,9 @@
     "prestart": "npm run build:all",
     "start": "dotenvx run -- node dist/server.js",
     "worker": "dotenvx run -- tsx src/worker.ts",
-    "start:worker": "dotenvx run -- node dist/worker.js"
+    "start:worker": "dotenvx run -- node dist/worker.js",
+    "docker:up": "docker compose up --build",
+    "docker:down": "docker compose down"
   },
   "keywords": [],
   "author": "",
