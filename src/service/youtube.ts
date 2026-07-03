@@ -76,33 +76,174 @@ let transcriptProxyFetch:
   | ((input: RequestInfo | URL, init?: RequestInit) => Promise<Response>)
   | undefined;
 
+function normalizeProxyUrl(raw: string): string {
+  return raw.trim().replace(/^["']|["']$/g, "");
+}
+
+function resolveFetchUrl(input: RequestInfo | URL): string {
+  if (typeof input === "string") {
+    return input.startsWith("/")
+      ? `https://www.youtube.com${input}`
+      : input;
+  }
+
+  if (input instanceof URL) {
+    return input.href;
+  }
+
+  const requestUrl = input.url;
+  return requestUrl.startsWith("/")
+    ? `https://www.youtube.com${requestUrl}`
+    : requestUrl;
+}
+
+function assertProxyHostPort(host: string, port: string): void {
+  if (host === "host" || port === "port") {
+    throw new Error(
+      'Proxy host/port still look like placeholders — set TRANSCRIPT_PROXY_HOST and TRANSCRIPT_PROXY_PORT to your provider\'s values (Webshare: p.webshare.io and 80)',
+    );
+  }
+
+  if (!host.trim()) {
+    throw new Error("TRANSCRIPT_PROXY_HOST is empty");
+  }
+
+  if (!port.trim() || Number.isNaN(Number(port))) {
+    throw new Error(
+      `TRANSCRIPT_PROXY_PORT must be numeric (got "${port}") — Webshare residential is usually 80`,
+    );
+  }
+}
+
+function buildProxyUrl(
+  user: string,
+  pass: string,
+  host: string,
+  port: string,
+): string {
+  assertProxyHostPort(host, port);
+  return `http://${encodeURIComponent(user)}:${encodeURIComponent(pass)}@${host}:${port}`;
+}
+
+export function parseTranscriptProxyUrl(raw: string): URL {
+  const trimmed = normalizeProxyUrl(raw);
+
+  if (
+    trimmed.includes("@host:") ||
+    /(?:^|@)host:port(?:$|\/)/i.test(trimmed)
+  ) {
+    throw new Error(
+      'TRANSCRIPT_PROXY_URL still contains placeholder "host:port" — either set only user:pass (we default to Webshare p.webshare.io:80) or use TRANSCRIPT_PROXY_USER + TRANSCRIPT_PROXY_PASS',
+    );
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error(
+      "TRANSCRIPT_PROXY_URL is not a valid URL — use user:pass, http://USER:PASS@host:PORT, or TRANSCRIPT_PROXY_USER + TRANSCRIPT_PROXY_PASS",
+    );
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("TRANSCRIPT_PROXY_URL must use http:// or https://");
+  }
+
+  if (!parsed.hostname || parsed.hostname === "host") {
+    throw new Error("TRANSCRIPT_PROXY_URL is missing a real proxy hostname");
+  }
+
+  if (!parsed.port || parsed.port === "port" || Number.isNaN(Number(parsed.port))) {
+    throw new Error(
+      `TRANSCRIPT_PROXY_URL has invalid port "${parsed.port || "(none)"}" — use a numeric port such as 80 or 8080`,
+    );
+  }
+
+  return parsed;
+}
+
+/** Resolve proxy from TRANSCRIPT_PROXY_URL and/or TRANSCRIPT_PROXY_USER/PASS. */
+export function resolveTranscriptProxyUrl(): string | undefined {
+  const urlSetting = env.TRANSCRIPT_PROXY_URL?.trim();
+  const user = env.TRANSCRIPT_PROXY_USER?.trim();
+  const pass = env.TRANSCRIPT_PROXY_PASS;
+
+  if (urlSetting) {
+    const trimmed = normalizeProxyUrl(urlSetting);
+
+    if (!trimmed.includes("://") && !trimmed.includes("@")) {
+      const colon = trimmed.indexOf(":");
+      if (colon <= 0 || colon === trimmed.length - 1) {
+        throw new Error(
+          "TRANSCRIPT_PROXY_URL shorthand must be user:pass — host/port come from TRANSCRIPT_PROXY_HOST and TRANSCRIPT_PROXY_PORT",
+        );
+      }
+
+      return buildProxyUrl(
+        trimmed.slice(0, colon),
+        trimmed.slice(colon + 1),
+        env.TRANSCRIPT_PROXY_HOST,
+        env.TRANSCRIPT_PROXY_PORT,
+      );
+    }
+
+    if (!trimmed.includes("://") && trimmed.includes("@")) {
+      return parseTranscriptProxyUrl(`http://${trimmed}`).href;
+    }
+
+    return parseTranscriptProxyUrl(trimmed).href;
+  }
+
+  if (user && pass) {
+    return buildProxyUrl(
+      user,
+      pass,
+      env.TRANSCRIPT_PROXY_HOST,
+      env.TRANSCRIPT_PROXY_PORT,
+    );
+  }
+
+  return undefined;
+}
+
 function getTranscriptFetchConfig(): {
   fetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 } {
-  if (!env.TRANSCRIPT_PROXY_URL) {
+  const proxyUrl = resolveTranscriptProxyUrl();
+  if (!proxyUrl) {
     return {};
   }
 
   if (!transcriptProxyFetch) {
-    const agent = new ProxyAgent(env.TRANSCRIPT_PROXY_URL);
-    transcriptProxyFetch = (input, init) =>
-      undiciFetch(input as string | URL, {
-        ...(init as UndiciRequestInit | undefined),
+    const agent = new ProxyAgent(proxyUrl);
+    transcriptProxyFetch = (input, init) => {
+      const undiciInit = init as UndiciRequestInit | undefined;
+
+      return undiciFetch(resolveFetchUrl(input), {
+        method: undiciInit?.method,
+        headers: undiciInit?.headers,
+        body: undiciInit?.body,
         dispatcher: agent,
       }) as unknown as Promise<Response>;
+    };
   }
 
   return { fetch: transcriptProxyFetch };
 }
 
 export function logTranscriptNetworkConfig(): void {
-  if (env.TRANSCRIPT_PROXY_URL) {
-    console.log("[worker] Transcript fetches use TRANSCRIPT_PROXY_URL");
+  const proxyUrl = resolveTranscriptProxyUrl();
+  if (!proxyUrl) {
+    console.warn(
+      "[worker] No transcript proxy configured — YouTube often blocks transcript fetches from cloud/datacenter IPs. Set TRANSCRIPT_PROXY_USER + TRANSCRIPT_PROXY_PASS, or TRANSCRIPT_PROXY_URL=user:pass",
+    );
     return;
   }
 
-  console.warn(
-    "[worker] TRANSCRIPT_PROXY_URL not set — YouTube often blocks transcript fetches from cloud/datacenter IPs",
+  const parsed = new URL(proxyUrl);
+  console.log(
+    `[worker] Transcript fetches use proxy ${parsed.hostname}:${parsed.port}`,
   );
 }
 
