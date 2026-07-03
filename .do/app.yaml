@@ -12,15 +12,16 @@ services:
       branch: master
       deploy_on_push: true
     dockerfile_path: Dockerfile
+    run_command: node dist/server.js
     http_port: 3000
     instance_count: 1
     instance_size_slug: basic-xxs
     health_check:
       http_path: /health
-      initial_delay_seconds: 60
+      initial_delay_seconds: 90
       period_seconds: 10
       timeout_seconds: 5
-      failure_threshold: 6
+      failure_threshold: 9
     envs:
       - key: DOTENV_PRIVATE_KEY
         scope: RUN_TIME
