@@ -1,6 +1,5 @@
 import mongoose, { Schema, type Document, type Model } from "mongoose";
-
-export type AuthProvider = "local" | "google";
+import { AuthProvider } from "../enums.js";
 
 export interface IUser {
   email: string;
@@ -43,7 +42,7 @@ const userSchema = new Schema<IUserDocument>(
     },
     authProvider: {
       type: String,
-      enum: ["local", "google"],
+      enum: Object.values(AuthProvider),
       required: true,
     },
     avatarUrl: String,

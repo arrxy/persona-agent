@@ -1,8 +1,5 @@
 import mongoose, { Schema, type Document, type Model, type Types } from "mongoose";
-
-export type ChunkSentiment = "positive" | "neutral" | "negative";
-
-export type ChunkContentType = "tutorial" | "story" | "opinion" | "review" | "interview" | "rant" | "general";
+import { ChunkContentType, ChunkSentiment } from "../enums.js";
 
 export interface ITranscriptChunk {
   creatorId: Types.ObjectId;
@@ -130,20 +127,12 @@ const transcriptChunkSchema = new Schema<ITranscriptChunkDocument>(
       },
       sentiment: {
         type: String,
-        enum: ["positive", "neutral", "negative"],
+        enum: Object.values(ChunkSentiment),
       },
       contentType: {
         type: String,
-        enum: [
-          "tutorial",
-          "story",
-          "opinion",
-          "review",
-          "interview",
-          "rant",
-          "general",
-        ],
-        default: "general",
+        enum: Object.values(ChunkContentType),
+        default: ChunkContentType.GENERAL,
       },
     },
 

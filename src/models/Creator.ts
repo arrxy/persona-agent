@@ -1,16 +1,16 @@
 import mongoose, { Schema, type Document, type Model } from "mongoose";
-
-export type CreatorSource = "youtube";
-
-export type PersonaStatus = "collecting" | "processing" | "ready" | "failed";
-
-export type IngestionStrategy = "top_views_longest" | "recent" | "manual";
-
-export type PersonaMode = "inspired_by" | "quote_with_citations";
+import {
+  CreatorSource,
+  IngestionStrategy,
+  PersonaMode,
+  PersonaStatus,
+} from "../enums.js";
 
 export interface ICreator {
   channelId: string;
+  channelUrl: string;
   handle?: string;
+
   name: string;
   description?: string;
 
@@ -18,6 +18,7 @@ export interface ICreator {
   bannerUrl?: string;
 
   source: CreatorSource;
+
   personaStatus: PersonaStatus;
 
   stats?: {
@@ -32,6 +33,7 @@ export interface ICreator {
     selectedVideoCount: number;
     lastIngestedAt?: Date;
     strategy: IngestionStrategy;
+    sourceVideoLimit?: number;
   };
 
   personaConfig: {
@@ -39,6 +41,15 @@ export interface ICreator {
     tone: string[];
     allowedMode: PersonaMode;
     disclaimer?: string;
+
+    styleStrength: number;
+
+    identityPolicy: {
+      canClaimToBeCreator: boolean;
+      mustDiscloseFanMade: boolean;
+      canUseFirstPerson: boolean;
+      canMentionCreatorName: boolean;
+    };
   };
 }
 
@@ -56,15 +67,24 @@ const creatorSchema = new Schema<ICreatorDocument>(
       unique: true,
       trim: true,
     },
+
+    channelUrl: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
     handle: {
       type: String,
       trim: true,
     },
+
     name: {
       type: String,
       required: true,
       trim: true,
     },
+
     description: String,
 
     avatarUrl: String,
@@ -72,15 +92,15 @@ const creatorSchema = new Schema<ICreatorDocument>(
 
     source: {
       type: String,
-      enum: ["youtube"],
-      default: "youtube",
+      enum: Object.values(CreatorSource),
+      default: CreatorSource.YOUTUBE,
       required: true,
     },
 
     personaStatus: {
       type: String,
-      enum: ["collecting", "processing", "ready", "failed"],
-      default: "collecting",
+      enum: Object.values(PersonaStatus),
+      default: PersonaStatus.NOT_STARTED,
       required: true,
     },
 
@@ -95,19 +115,28 @@ const creatorSchema = new Schema<ICreatorDocument>(
         type: Number,
         default: 20,
       },
+
       collectedTranscriptSeconds: {
         type: Number,
         default: 0,
       },
+
       selectedVideoCount: {
         type: Number,
         default: 0,
       },
+
       lastIngestedAt: Date,
+
       strategy: {
         type: String,
-        enum: ["top_views_longest", "recent", "manual"],
-        default: "top_views_longest",
+        enum: Object.values(IngestionStrategy),
+        default: IngestionStrategy.TOP_VIEWS_LONGEST,
+      },
+
+      sourceVideoLimit: {
+        type: Number,
+        default: 100,
       },
     },
 
@@ -116,22 +145,61 @@ const creatorSchema = new Schema<ICreatorDocument>(
         type: String,
         default: "en",
       },
+
       tone: {
         type: [String],
         default: [],
       },
+
       allowedMode: {
         type: String,
-        enum: ["inspired_by", "quote_with_citations"],
-        default: "inspired_by",
+        enum: Object.values(PersonaMode),
+        default: PersonaMode.STYLE_SIMULATION,
       },
-      disclaimer: String,
+
+      disclaimer: {
+        type: String,
+        default:
+          "This is an AI persona generated from public YouTube content. It is not the real creator.",
+      },
+
+      styleStrength: {
+        type: Number,
+        min: 0,
+        max: 1,
+        default: 0.75,
+      },
+
+      identityPolicy: {
+        canClaimToBeCreator: {
+          type: Boolean,
+          default: false,
+        },
+
+        mustDiscloseFanMade: {
+          type: Boolean,
+          default: true,
+        },
+
+        canUseFirstPerson: {
+          type: Boolean,
+          default: false,
+        },
+
+        canMentionCreatorName: {
+          type: Boolean,
+          default: true,
+        },
+      },
     },
   },
   { timestamps: true },
 );
 
-creatorSchema.index({ handle: 1 });
 creatorSchema.index({ personaStatus: 1 });
+creatorSchema.index({ handle: 1 });
+creatorSchema.index({ "ingestion.lastIngestedAt": 1 });
 
-export const Creator: Model<ICreatorDocument> = mongoose.models.Creator ?? mongoose.model<ICreatorDocument>("Creator", creatorSchema);
+export const Creator: Model<ICreatorDocument> =
+  mongoose.models.Creator ??
+  mongoose.model<ICreatorDocument>("Creator", creatorSchema);

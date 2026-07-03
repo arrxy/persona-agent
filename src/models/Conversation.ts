@@ -1,6 +1,5 @@
 import mongoose, { Schema, type Document, type Model, type Types } from "mongoose";
-
-export type ConversationMode = "chat" | "ask_with_sources" | "roleplay" | "coach";
+import { ConversationMode } from "../enums.js";
 
 export interface IConversation {
   userId?: Types.ObjectId;
@@ -39,8 +38,8 @@ const conversationSchema = new Schema<IConversationDocument>(
 
     mode: {
       type: String,
-      enum: ["chat", "ask_with_sources", "roleplay", "coach"],
-      default: "chat",
+      enum: Object.values(ConversationMode),
+      default: ConversationMode.CHAT,
       required: true,
     },
   },
@@ -51,4 +50,3 @@ conversationSchema.index({ userId: 1, updatedAt: -1 });
 conversationSchema.index({ creatorId: 1, updatedAt: -1 });
 
 export const Conversation: Model<IConversationDocument> = mongoose.models.Conversation ?? mongoose.model<IConversationDocument>("Conversation", conversationSchema);
-  mongoose.model<IConversationDocument>("Conversation", conversationSchema);

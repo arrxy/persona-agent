@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { env } from "../config/env.js";
 import { redis } from "../config/redis.js";
 import { User, type IUserDocument } from "../models/User.js";
+import { AuthProvider } from "../enums.js";
 import { AppError } from "../utils/errors.js";
 
 const googleClient = new OAuth2Client(env.GOOGLE_CLIENT_ID);
@@ -19,7 +20,7 @@ export interface PublicUser {
   id: string;
   email: string;
   name: string;
-  authProvider: "local" | "google";
+  authProvider: AuthProvider;
   avatarUrl?: string;
   createdAt: Date;
 }
@@ -89,7 +90,7 @@ export class AuthService {
       email,
       password: input.password,
       name: input.name.trim(),
-      authProvider: "local",
+      authProvider: AuthProvider.LOCAL,
     });
 
     const tokens = await issueTokens(user);
@@ -144,7 +145,7 @@ export class AuthService {
     if (user) {
       if (!user.googleId) {
         user.googleId = payload.sub;
-        user.authProvider = "google";
+        user.authProvider = AuthProvider.GOOGLE;
         if (payload.picture && !user.avatarUrl) {
           user.avatarUrl = payload.picture;
         }
@@ -155,7 +156,7 @@ export class AuthService {
         email,
         name: payload.name ?? email.split("@")[0],
         googleId: payload.sub,
-        authProvider: "google",
+        authProvider: AuthProvider.GOOGLE,
         avatarUrl: payload.picture,
       });
     }

@@ -1,8 +1,5 @@
 import mongoose, { Schema, type Document, type Model, type Types } from "mongoose";
-
-export type MessageRole = "user" | "assistant" | "system";
-
-export type ImpersonationRisk = "low" | "medium" | "high";
+import { ImpersonationRisk, MessageRole } from "../enums.js";
 
 export interface IMessage {
   conversationId: Types.ObjectId;
@@ -63,7 +60,7 @@ const messageSchema = new Schema<IMessageDocument>(
 
     role: {
       type: String,
-      enum: ["user", "assistant", "system"],
+      enum: Object.values(MessageRole),
       required: true,
     },
 
@@ -100,7 +97,7 @@ const messageSchema = new Schema<IMessageDocument>(
     safety: {
       impersonationRisk: {
         type: String,
-        enum: ["low", "medium", "high"],
+        enum: Object.values(ImpersonationRisk),
       },
       usedDisclaimer: Boolean,
     },
