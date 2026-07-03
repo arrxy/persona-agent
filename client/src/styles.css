@@ -1046,13 +1046,30 @@ input::placeholder {
   cursor: not-allowed;
 }
 
-.google-signin-hidden {
-  position: absolute;
-  width: 0;
-  height: 0;
-  overflow: hidden;
-  opacity: 0;
+.google-signin-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.btn-google-visual {
   pointer-events: none;
+}
+
+.google-signin-wrap.is-loading .google-signin-overlay {
+  pointer-events: none;
+}
+
+.google-signin-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  opacity: 0.01;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.google-signin-overlay iframe {
+  margin: 0 !important;
 }
 
 .auth-divider {

@@ -40,6 +40,7 @@ export default function AuthPage({ onSuccess }: AuthPageProps) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [googleClientId, setGoogleClientId] = useState<string | null>(null);
+  const googleWrapRef = useRef<HTMLDivElement>(null);
   const googleButtonRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -83,18 +84,24 @@ export default function AuthPage({ onSuccess }: AuthPageProps) {
             }
           })();
         },
+        use_fedcm_for_prompt: true,
       });
+
+      const width = googleWrapRef.current?.offsetWidth ?? 400;
 
       window.google.accounts.id.renderButton(googleButtonRef.current, {
         type: "standard",
         theme: "outline",
         size: "large",
         text: "continue_with",
-        width: 400,
+        width: Math.min(width, 400),
       });
 
       googleButtonRef.current.dataset.initialized = "true";
-      return true;
+
+      return Boolean(
+        googleButtonRef.current.querySelector('div[role="button"]'),
+      );
     }
 
     if (initGoogle()) return;
@@ -110,13 +117,6 @@ export default function AuthPage({ onSuccess }: AuthPageProps) {
       window.clearInterval(interval);
     };
   }, [googleClientId, onSuccess]);
-
-  function handleGoogleClick() {
-    const rendered = googleButtonRef.current?.querySelector(
-      'div[role="button"]',
-    ) as HTMLElement | null;
-    rendered?.click();
-  }
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -161,16 +161,16 @@ export default function AuthPage({ onSuccess }: AuthPageProps) {
 
         {googleClientId && (
           <>
-            <button
-              type="button"
-              className="btn-google"
-              onClick={handleGoogleClick}
-              disabled={loading}
+            <div
+              ref={googleWrapRef}
+              className={`google-signin-wrap${loading ? " is-loading" : ""}`}
             >
-              <GoogleIcon />
-              Continue with Google
-            </button>
-            <div ref={googleButtonRef} className="google-signin-hidden" />
+              <div className="btn-google btn-google-visual" aria-hidden="true">
+                <GoogleIcon />
+                Continue with Google
+              </div>
+              <div ref={googleButtonRef} className="google-signin-overlay" />
+            </div>
 
             <div className="auth-divider">
               <span>OR</span>
