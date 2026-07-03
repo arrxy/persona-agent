@@ -23,12 +23,7 @@ import {
 } from "../service/youtube/videoSelection.js";
 import { embedVideoTranscript } from "../service/ingestion/embedVideo.js";
 import { normalizePersonaLanguage } from "../service/persona/language.js";
-import {
-  fetchTranscriptsFromIoApi,
-  getYoutubeTranscript,
-  isTranscriptIoConfigured,
-  type TranscriptSegment,
-} from "../service/youtube.js";
+import { getYoutubeTranscript } from "../service/youtube.js";
 import type { ICreatorDocument } from "../models/Creator.js";
 
 const MAX_ATTEMPTS = 3;
@@ -69,7 +64,6 @@ async function fetchAndScoreVideo(params: {
   youtubeVideoId: string;
   creatorName: string;
   handle?: string;
-  segments?: TranscriptSegment[];
 }): Promise<void> {
   const video = await CreatorVideo.findOne({
     creatorId: params.creatorId,
@@ -79,12 +73,7 @@ async function fetchAndScoreVideo(params: {
   if (!video) return;
 
   try {
-    let segments = params.segments;
-    if (segments !== undefined && segments.length === 0) {
-      throw new Error(`No transcript available for video ${params.youtubeVideoId}`);
-    }
-
-    segments ??= await getYoutubeTranscript(params.youtubeVideoId);
+    const segments = await getYoutubeTranscript(params.youtubeVideoId);
     const transcriptText = segments.map((segment) => segment.text).join(" ");
     const wordCount = transcriptText.split(/\s+/).filter(Boolean).length;
     const totalSeconds = segments.at(-1)?.endSeconds ?? 0;
@@ -103,9 +92,7 @@ async function fetchAndScoreVideo(params: {
 
     video.transcript = {
       available: true,
-      source: isTranscriptIoConfigured()
-        ? TranscriptSource.THIRD_PARTY
-        : TranscriptSource.YOUTUBE,
+      source: TranscriptSource.YOUTUBE,
       language: selection.detectedLanguage,
       fetchedAt: new Date(),
       totalSeconds,
@@ -212,18 +199,6 @@ export async function processCreatorRequest(
       `[worker] Scoring ${candidates.length} transcript candidates (strategy=${creator.ingestion.strategy})`,
     );
 
-    const transcriptMap = isTranscriptIoConfigured()
-      ? await fetchTranscriptsFromIoApi(
-          candidates.map((candidate) => candidate.youtubeVideoId),
-        )
-      : undefined;
-
-    if (transcriptMap) {
-      console.log(
-        `[worker] Fetched ${transcriptMap.size} transcripts via youtube-transcript.io API`,
-      );
-    }
-
     for (const candidate of candidates) {
       await fetchAndScoreVideo({
         creator,
@@ -231,7 +206,6 @@ export async function processCreatorRequest(
         youtubeVideoId: candidate.youtubeVideoId,
         creatorName: channel.name,
         handle: channel.handle,
-        segments: transcriptMap?.get(candidate.youtubeVideoId),
       });
     }
 

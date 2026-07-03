@@ -1,19 +1,13 @@
 import { YoutubeTranscript } from "youtube-transcript";
 import { creatorRequestRepository } from "../repository/CreatorRequestRepository.js";
 import { CreatorRequestStatus } from "../enums.js";
-import {
-  fetchTranscriptFromIoApi,
-  fetchTranscriptsFromIoApi,
-  isTranscriptIoConfigured,
-  type TranscriptSegment,
-} from "./youtube/transcriptIo.js";
 
-export type { TranscriptSegment } from "./youtube/transcriptIo.js";
-
-export {
-  fetchTranscriptsFromIoApi,
-  isTranscriptIoConfigured,
-} from "./youtube/transcriptIo.js";
+export interface TranscriptSegment {
+  text: string;
+  startSeconds: number;
+  durationSeconds: number;
+  endSeconds: number;
+}
 
 export function extractYoutubeVideoId(input: string): string {
   const trimmed = input.trim();
@@ -58,7 +52,14 @@ function cleanTranscriptText(text: string): string {
 
 const TRANSCRIPT_LANG_TRY_ORDER = ["en", "hi", "hi-IN", "en-IN", "en-US"];
 
-async function fetchTranscriptDirect(videoId: string): Promise<TranscriptSegment[]> {
+export function logTranscriptNetworkConfig(): void {
+  console.log("[worker] Transcript fetches use YouTube directly (youtube-transcript)");
+}
+
+export async function getYoutubeTranscript(
+  input: string,
+): Promise<TranscriptSegment[]> {
+  const videoId = extractYoutubeVideoId(input);
   let lastError: Error | undefined;
 
   for (const lang of TRANSCRIPT_LANG_TRY_ORDER) {
@@ -112,31 +113,6 @@ async function fetchTranscriptDirect(videoId: string): Promise<TranscriptSegment
   }
 
   throw lastError ?? new Error("No transcript available for this video");
-}
-
-export function logTranscriptNetworkConfig(): void {
-  if (isTranscriptIoConfigured()) {
-    console.log(
-      "[worker] Transcript fetches use youtube-transcript.io API (YOUTUBE_TRANSCRIPT_IO_API_TOKEN)",
-    );
-    return;
-  }
-
-  console.warn(
-    "[worker] YOUTUBE_TRANSCRIPT_IO_API_TOKEN not set — falling back to direct YouTube fetches (blocked on cloud/datacenter IPs)",
-  );
-}
-
-export async function getYoutubeTranscript(
-  input: string,
-): Promise<TranscriptSegment[]> {
-  const videoId = extractYoutubeVideoId(input);
-
-  if (isTranscriptIoConfigured()) {
-    return fetchTranscriptFromIoApi(videoId);
-  }
-
-  return fetchTranscriptDirect(videoId);
 }
 
 export async function requestCreator({
