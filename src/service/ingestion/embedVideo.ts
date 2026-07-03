@@ -31,7 +31,8 @@ export async function embedVideoTranscript(params: {
   await TranscriptChunk.deleteMany({ videoId: video._id });
 
   const vectors = await embedTexts(drafts.map((draft) => draft.text));
-  const language = creator.personaConfig?.language ?? "en";
+  const language =
+    video.transcript?.language ?? creator.personaConfig?.language ?? "en";
   const points: QdrantChunkPoint[] = [];
   const chunkDocs = [];
 

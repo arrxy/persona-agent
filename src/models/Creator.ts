@@ -167,7 +167,7 @@ const creatorSchema = new Schema<ICreatorDocument>(
         type: Number,
         min: 0,
         max: 1,
-        default: 0.75,
+        default: 1,
       },
 
       identityPolicy: {
@@ -183,7 +183,7 @@ const creatorSchema = new Schema<ICreatorDocument>(
 
         canUseFirstPerson: {
           type: Boolean,
-          default: false,
+          default: true,
         },
 
         canMentionCreatorName: {

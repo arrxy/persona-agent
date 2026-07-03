@@ -217,6 +217,23 @@ export async function processCreatorRequest(workerId: string): Promise<boolean> 
       },
     ]).then((rows) => rows[0]?.totalSeconds ?? 0);
 
+    const languageBreakdown = await CreatorVideo.aggregate([
+      {
+        $match: {
+          creatorId: creator._id,
+          "selection.selectedForPersona": true,
+          "transcript.available": true,
+        },
+      },
+      { $group: { _id: "$transcript.language", count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+    ]);
+
+    const dominantLanguage = languageBreakdown[0]?._id;
+    if (typeof dominantLanguage === "string") {
+      creator.personaConfig.language = dominantLanguage;
+    }
+
     await embedSelectedCreatorVideos(creator);
 
     const embeddedChunkCount = await TranscriptChunk.countDocuments({

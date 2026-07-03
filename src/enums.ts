@@ -84,3 +84,10 @@ export enum VideoProcessingStatus {
   EMBEDDED = "embedded",
   FAILED = "failed",
 }
+
+export enum UserMemoryCategory {
+  PREFERENCE = "preference",
+  CONTEXT = "context",
+  PLAN = "plan",
+  RELATIONSHIP = "relationship",
+}

@@ -80,7 +80,7 @@ const messageSchema = new Schema<IMessageDocument>(
       retrievedFactIds: [
         {
           type: Schema.Types.ObjectId,
-          ref: "CreatorFact",
+          ref: "UserMemory",
         },
       ],
       score: Number,
