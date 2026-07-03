@@ -1,5 +1,6 @@
 // /api/v1/auth
 import { Router } from "express";
+import { env } from "../config/env.js";
 import { AuthService } from "../service/auth.js";
 import {
   asyncHandler,
@@ -9,6 +10,10 @@ import {
 import { AppError } from "../utils/errors.js";
 
 const router = Router();
+
+router.get("/config", (_req, res) => {
+  res.status(200).json({ googleClientId: env.GOOGLE_CLIENT_ID });
+});
 
 function validateEmail(email: unknown): string {
   if (typeof email !== "string" || !email.includes("@")) {

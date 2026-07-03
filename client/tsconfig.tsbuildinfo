@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/api.ts","./src/google.d.ts","./src/main.tsx","./src/utils.ts","./src/vite-env.d.ts","./src/components/authpage.tsx","./src/components/chatview.tsx","./src/components/createpersonamodal.tsx","./src/components/personapicker.tsx","./src/components/sidebar.tsx"],"version":"5.8.3"}

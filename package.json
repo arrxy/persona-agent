@@ -6,8 +6,11 @@
   "scripts": {
     "dev": "dotenvx run -- tsx watch src/server.ts",
     "dev:worker": "dotenvx run -- tsx watch src/worker.ts",
+    "dev:client": "npm run dev --prefix client",
     "build": "tsc",
-    "prestart": "npm run build",
+    "build:client": "npm run build --prefix client",
+    "build:all": "npm run build && npm run build:client",
+    "prestart": "npm run build:all",
     "start": "dotenvx run -- node dist/server.js",
     "worker": "dotenvx run -- tsx src/worker.ts",
     "start:worker": "dotenvx run -- node dist/worker.js"
