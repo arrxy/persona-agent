@@ -1,0 +1,183 @@
+import { OpenAI } from "openai";
+import { env } from "../../config/env.js";
+import { ConversationMode, MessageRole } from "../../enums.js";
+import { Conversation } from "../../models/Conversation.js";
+import { Creator } from "../../models/Creator.js";
+import { Message } from "../../models/Message.js";
+import { AppError } from "../../utils/errors.js";
+import { extractAndStoreMemories } from "../memory/extract.js";
+import { searchUserMemories } from "../memory/search.js";
+import { searchCreatorChunks } from "../qdrant/search.js";
+import { buildChatMessages } from "./buildContext.js";
+
+const openai = new OpenAI({ apiKey: env.OPEN_AI_KEY });
+
+function requireOpenAiKey(): void {
+  if (!env.OPEN_AI_KEY) {
+    throw new AppError(503, "Chat is unavailable: OPEN_AI_KEY not configured");
+  }
+}
+
+export interface ChatInput {
+  userId: string;
+  creatorId: string;
+  conversationId?: string;
+  message: string;
+}
+
+export interface ChatSource {
+  type: "transcript" | "memory";
+  text: string;
+  videoTitle?: string;
+  videoUrl?: string;
+  score: number;
+}
+
+export interface ChatResult {
+  conversationId: string;
+  reply: string;
+  sources: ChatSource[];
+}
+
+async function getOrCreateConversation(params: {
+  userId: string;
+  creatorId: string;
+  conversationId?: string;
+  message: string;
+}) {
+  if (params.conversationId) {
+    const conversation = await Conversation.findOne({
+      _id: params.conversationId,
+      userId: params.userId,
+      creatorId: params.creatorId,
+    });
+
+    if (!conversation) {
+      throw new AppError(404, "Conversation not found");
+    }
+
+    return conversation;
+  }
+
+  return Conversation.create({
+    userId: params.userId,
+    creatorId: params.creatorId,
+    mode: ConversationMode.CHAT,
+    title: params.message.slice(0, 80),
+  });
+}
+
+export async function chatWithPersona(input: ChatInput): Promise<ChatResult> {
+  requireOpenAiKey();
+
+  const creator = await Creator.findById(input.creatorId);
+  if (!creator) {
+    throw new AppError(404, "Creator not found");
+  }
+
+  const conversation = await getOrCreateConversation({
+    userId: input.userId,
+    creatorId: input.creatorId,
+    conversationId: input.conversationId,
+    message: input.message,
+  });
+
+  const conversationId = conversation._id.toString();
+
+  const [creatorChunks, userMemories, recentMessages] = await Promise.all([
+    searchCreatorChunks({
+      creatorId: input.creatorId,
+      query: input.message,
+      topK: env.CREATOR_RAG_TOP_K,
+    }),
+    searchUserMemories({
+      userId: input.userId,
+      creatorId: input.creatorId,
+      query: input.message,
+      topK: env.USER_MEMORY_TOP_K,
+    }),
+    Message.find({ conversationId: conversation._id })
+      .sort({ createdAt: -1 })
+      .limit(env.CHAT_SESSION_TURNS * 2)
+      .then((rows) => rows.reverse()),
+  ]);
+
+  const messages = buildChatMessages({
+    creator,
+    creatorChunks,
+    userMemories,
+    recentMessages,
+    userMessage: input.message,
+  });
+
+  const completion = await openai.chat.completions.create({
+    model: env.CHAT_MODEL,
+    temperature: 0.7,
+    messages,
+  });
+
+  const reply = completion.choices[0]?.message?.content?.trim();
+  if (!reply) {
+    throw new AppError(502, "Model returned an empty response");
+  }
+
+  const userMessageDoc = await Message.create({
+    conversationId: conversation._id,
+    creatorId: creator._id,
+    userId: input.userId,
+    role: MessageRole.USER,
+    content: input.message,
+  });
+
+  const assistantMessageDoc = await Message.create({
+    conversationId: conversation._id,
+    creatorId: creator._id,
+    userId: input.userId,
+    role: MessageRole.ASSISTANT,
+    content: reply,
+    retrieval: {
+      query: input.message,
+      retrievedChunkIds: creatorChunks.map((chunk) => chunk.chunkId),
+      retrievedFactIds: userMemories.map((memory) => memory.memoryId),
+      modelUsed: env.CHAT_MODEL,
+    },
+    generation: {
+      model: env.CHAT_MODEL,
+      temperature: 0.7,
+      promptVersion: "persona-chat-v1",
+    },
+    safety: {
+      usedDisclaimer: creator.personaConfig.identityPolicy.mustDiscloseFanMade,
+    },
+  });
+
+  void extractAndStoreMemories({
+    userId: input.userId,
+    creatorId: input.creatorId,
+    conversationId,
+    userMessage: input.message,
+    assistantMessage: reply,
+    sourceMessageIds: [userMessageDoc._id, assistantMessageDoc._id],
+  });
+
+  const sources: ChatSource[] = [
+    ...creatorChunks.map((chunk) => ({
+      type: "transcript" as const,
+      text: chunk.text,
+      videoTitle: chunk.videoTitle,
+      videoUrl: chunk.videoUrl,
+      score: chunk.score,
+    })),
+    ...userMemories.map((memory) => ({
+      type: "memory" as const,
+      text: memory.text,
+      score: memory.score,
+    })),
+  ];
+
+  return {
+    conversationId,
+    reply,
+    sources,
+  };
+}
