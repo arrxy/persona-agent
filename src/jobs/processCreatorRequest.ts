@@ -19,6 +19,7 @@ import { embedSelectedCreatorVideos } from "../service/ingestion/embedVideo.js";
 import {
   getTranscriptCandidateVideos,
   scoreCreatorPresence,
+  selectFallbackVideos,
 } from "../service/youtube/videoSelection.js";
 import { embedVideoTranscript } from "../service/ingestion/embedVideo.js";
 import { normalizePersonaLanguage } from "../service/persona/language.js";
@@ -183,10 +184,27 @@ export async function processCreatorRequest(workerId: string): Promise<boolean> 
       });
     }
 
-    const selectedVideoCount = await CreatorVideo.countDocuments({
+    let selectedVideoCount = await CreatorVideo.countDocuments({
       creatorId: creator._id,
       "selection.selectedForPersona": true,
     });
+
+    if (selectedVideoCount === 0) {
+      const transcriptCount = await CreatorVideo.countDocuments({
+        creatorId: creator._id,
+        "transcript.available": true,
+      });
+
+      if (transcriptCount === 0) {
+        throw new Error(
+          "No fetchable transcripts found on this channel. Videos may not have captions enabled.",
+        );
+      }
+
+      selectedVideoCount = await selectFallbackVideos({
+        creatorId: creator._id.toString(),
+      });
+    }
 
     await CreatorVideo.updateMany(
       {

@@ -50,13 +50,9 @@ function cleanTranscriptText(text: string): string {
     .trim();
 }
 
-export async function getYoutubeTranscript(
-  input: string,
-): Promise<TranscriptSegment[]> {
-  const videoId = extractYoutubeVideoId(input);
-
-  const rawTranscript = await YoutubeTranscript.fetchTranscript(videoId);
-
+function mapRawTranscript(
+  rawTranscript: Awaited<ReturnType<typeof YoutubeTranscript.fetchTranscript>>,
+): TranscriptSegment[] {
   return rawTranscript
     .map((item) => {
       const startSeconds = Number(item.offset) / 1000;
@@ -70,6 +66,41 @@ export async function getYoutubeTranscript(
       };
     })
     .filter((segment: TranscriptSegment) => segment.text.length > 0);
+}
+
+const TRANSCRIPT_LANG_TRY_ORDER = ["en", "hi", "hi-IN", "en-IN", "en-US"];
+
+export async function getYoutubeTranscript(
+  input: string,
+): Promise<TranscriptSegment[]> {
+  const videoId = extractYoutubeVideoId(input);
+  let lastError: Error | undefined;
+
+  for (const lang of TRANSCRIPT_LANG_TRY_ORDER) {
+    try {
+      const rawTranscript = await YoutubeTranscript.fetchTranscript(videoId, {
+        lang,
+      });
+      const segments = mapRawTranscript(rawTranscript);
+      if (segments.length > 0) {
+        return segments;
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+    }
+  }
+
+  try {
+    const rawTranscript = await YoutubeTranscript.fetchTranscript(videoId);
+    const segments = mapRawTranscript(rawTranscript);
+    if (segments.length > 0) {
+      return segments;
+    }
+  } catch (error) {
+    lastError = error instanceof Error ? error : new Error(String(error));
+  }
+
+  throw lastError ?? new Error("No transcript available for this video");
 }
 
 export async function requestCreator({

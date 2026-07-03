@@ -66,6 +66,17 @@ function countNameMentions(
       "gi",
     );
     mentions += normalized.match(handleRegex)?.length ?? 0;
+
+    const handleParts = handle
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((part) => part.length > 2);
+
+    for (const part of handleParts) {
+      const regex = new RegExp(`\\b${escapeRegex(part)}\\b`, "gi");
+      mentions += normalized.match(regex)?.length ?? 0;
+    }
   }
 
   return mentions;
@@ -180,4 +191,30 @@ export function getTranscriptCandidateVideos(
   limit = TRANSCRIPT_CANDIDATE_LIMIT,
 ): ChannelVideo[] {
   return rankVideosByStrategy(videos, strategy).slice(0, limit);
+}
+
+export const FALLBACK_SELECT_LIMIT = 10;
+
+export async function selectFallbackVideos(params: {
+  creatorId: string;
+  limit?: number;
+}): Promise<number> {
+  const { CreatorVideo } = await import("../../models/CreatorVideo.js");
+
+  const limit = params.limit ?? FALLBACK_SELECT_LIMIT;
+  const videos = await CreatorVideo.find({
+    creatorId: params.creatorId,
+    "transcript.available": true,
+    "selection.selectedForPersona": false,
+  })
+    .sort({ "selection.rankScore": -1, "stats.viewCount": -1 })
+    .limit(limit);
+
+  for (const video of videos) {
+    video.selection.selectedForPersona = true;
+    video.selection.reason = "fallback_top_ranked";
+    await video.save();
+  }
+
+  return videos.length;
 }
