@@ -106,6 +106,10 @@ async function fetchAndScoreVideo(params: {
     };
     await video.save();
 
+    console.log(
+      `[worker] Video ${params.youtubeVideoId}: transcript ok, selected=${selection.selectedForPersona}, score=${selection.rankScore.toFixed(2)}${selection.reason ? `, reason=${selection.reason}` : ""}`,
+    );
+
     if (selection.selectedForPersona) {
       try {
         await embedVideoTranscript({
@@ -136,8 +140,10 @@ async function fetchAndScoreVideo(params: {
       error: error instanceof Error ? error.message : "Transcript fetch failed",
     };
     await video.save();
+    console.log(
+      `[worker] Video ${params.youtubeVideoId}: no transcript (${error instanceof Error ? error.message : "fetch failed"})`,
+    );
   }
-
 }
 
 export async function processCreatorRequest(workerId: string): Promise<boolean> {
@@ -150,8 +156,16 @@ export async function processCreatorRequest(workerId: string): Promise<boolean> 
   const requestId = request._id.toString();
   const attempts = request.processing.attempts;
 
+  console.log(
+    `[worker] Claimed request ${requestId} (attempt ${attempts}, channel=${request.inputChannelUrl})`,
+  );
+
   try {
     const channel = await resolveChannel(request.inputChannelUrl);
+    console.log(
+      `[worker] Resolved channel "${channel.name}" (${channel.channelId}, handle=${channel.handle ?? "none"})`,
+    );
+
     const creator = await upsertCreatorFromChannel(channel);
 
     await creatorRequestRepository.attachCreator({
@@ -168,10 +182,14 @@ export async function processCreatorRequest(workerId: string): Promise<boolean> 
     );
 
     await upsertCreatorVideos(creator._id, channel.channelId, videos);
+    console.log(`[worker] Listed ${videos.length} videos from uploads playlist`);
 
     const candidates = getTranscriptCandidateVideos(
       videos,
       creator.ingestion.strategy,
+    );
+    console.log(
+      `[worker] Scoring ${candidates.length} transcript candidates (strategy=${creator.ingestion.strategy})`,
     );
 
     for (const candidate of candidates) {
@@ -195,6 +213,10 @@ export async function processCreatorRequest(workerId: string): Promise<boolean> 
         "transcript.available": true,
       });
 
+      console.log(
+        `[worker] No videos passed selection threshold (${transcriptCount} with transcripts)`,
+      );
+
       if (transcriptCount === 0) {
         throw new Error(
           "No fetchable transcripts found on this channel. Videos may not have captions enabled.",
@@ -204,6 +226,11 @@ export async function processCreatorRequest(workerId: string): Promise<boolean> 
       selectedVideoCount = await selectFallbackVideos({
         creatorId: creator._id.toString(),
       });
+      console.log(
+        `[worker] Fallback selected ${selectedVideoCount} video(s) by rank/views`,
+      );
+    } else {
+      console.log(`[worker] ${selectedVideoCount} video(s) passed selection threshold`);
     }
 
     await CreatorVideo.updateMany(
@@ -254,6 +281,7 @@ export async function processCreatorRequest(workerId: string): Promise<boolean> 
     }
 
     await embedSelectedCreatorVideos(creator);
+    console.log("[worker] Embedding pass complete for selected videos");
 
     const embeddedChunkCount = await TranscriptChunk.countDocuments({
       creatorId: creator._id,
@@ -271,7 +299,7 @@ export async function processCreatorRequest(workerId: string): Promise<boolean> 
       message: completionMessage,
     });
 
-    console.log(`Creator request ${requestId} completed: ${completionMessage}`);
+    console.log(`[worker] Request ${requestId} completed: ${completionMessage}`);
 
     return true;
   } catch (error) {
@@ -279,7 +307,13 @@ export async function processCreatorRequest(workerId: string): Promise<boolean> 
       error instanceof Error ? error.message : "Creator request processing failed";
 
     await handleJobFailure(requestId, attempts, "INGESTION_FAILED", message);
-    console.error(`Creator request ${requestId} failed:`, error);
+    if (attempts < MAX_ATTEMPTS) {
+      console.warn(
+        `[worker] Request ${requestId} failed (attempt ${attempts}/${MAX_ATTEMPTS}), will retry: ${message}`,
+      );
+    } else {
+      console.error(`[worker] Request ${requestId} failed permanently:`, error);
+    }
     return true;
   }
 }

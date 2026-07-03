@@ -15,12 +15,22 @@ async function poll(): Promise<void> {
 
   try {
     let processed = true;
+    let jobCount = 0;
 
     while (processed && !isShuttingDown) {
       processed = await processCreatorRequest(env.WORKER_ID);
+      if (processed) {
+        jobCount++;
+      }
+    }
+
+    if (jobCount > 0) {
+      console.log(`[worker] Poll finished — processed ${jobCount} creator request(s)`);
+    } else {
+      console.log("[worker] Poll finished — no pending creator requests");
     }
   } catch (error) {
-    console.error("Worker poll error:", error);
+    console.error("[worker] Poll error:", error);
   } finally {
     isProcessing = false;
   }
@@ -34,7 +44,7 @@ async function start(): Promise<void> {
   await connectDb();
 
   console.log(
-    `Creator ingestion worker started (id=${env.WORKER_ID}, poll=${env.WORKER_POLL_INTERVAL_MS}ms)`,
+    `[worker] Started (id=${env.WORKER_ID}, poll=${env.WORKER_POLL_INTERVAL_MS}ms)`,
   );
 
   await poll();
@@ -71,7 +81,7 @@ async function start(): Promise<void> {
 }
 
 start().catch((error) => {
-  console.error("Failed to start worker:", error);
+  console.error("[worker] Failed to start:", error);
   process.exit(1);
 });
 

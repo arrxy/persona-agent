@@ -4,11 +4,11 @@ import { connectDb, disconnectDb } from "./config/db.js";
 import { disconnectRedis } from "./config/redis.js";
 
 async function start() {
-  await connectDb();
-
   const server = app.listen(env.PORT, () => {
     console.log(`Server running on port ${env.PORT}`);
   });
+
+  await connectDb();
 
   function shutdown(signal: string) {
     console.log(`${signal} received. Shutting down server...`);

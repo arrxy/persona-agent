@@ -17,9 +17,10 @@ services:
     instance_size_slug: basic-xxs
     health_check:
       http_path: /health
-      initial_delay_seconds: 30
+      initial_delay_seconds: 60
       period_seconds: 10
       timeout_seconds: 5
+      failure_threshold: 6
     envs:
       - key: DOTENV_PRIVATE_KEY
         scope: RUN_TIME
