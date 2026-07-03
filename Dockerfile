@@ -20,6 +20,7 @@ RUN npm install --omit=dev
 
 COPY --from=builder /app/dist ./dist
 COPY .env.production ./.env.production
+RUN cp .env.production .env
 COPY scripts/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
