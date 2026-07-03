@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { fetchAuthConfig, loginWithGoogle } from "../api";
+import { fetchAuthConfig, login, loginWithGoogle, register } from "../api";
 import type { User } from "../api";
+
+/** Temporary — remove when Google sign-in is stable in production */
+const EMAIL_PASSWORD_AUTH_ENABLED = true;
 
 interface AuthPageProps {
   onSuccess: (user: User) => void;
@@ -30,6 +33,8 @@ function GoogleIcon() {
 }
 
 export default function AuthPage({ onSuccess }: AuthPageProps) {
+  const [mode, setMode] = useState<"login" | "register">("login");
+  const [form, setForm] = useState({ name: "", email: "", password: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [googleClientId, setGoogleClientId] = useState<string | null>(null);
@@ -111,6 +116,25 @@ export default function AuthPage({ onSuccess }: AuthPageProps) {
     };
   }, [googleClientId, onSuccess]);
 
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      const result =
+        mode === "login"
+          ? await login(form.email, form.password)
+          : await register(form.name, form.email, form.password);
+      onSuccess(result.user);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Auth failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const isLogin = mode === "login";
+
   return (
     <div className="auth-page">
       <header className="auth-header">
@@ -123,8 +147,12 @@ export default function AuthPage({ onSuccess }: AuthPageProps) {
       </header>
 
       <main className="auth-main">
-        <p className="auth-eyebrow">Welcome back</p>
-        <h1 className="auth-title">Sign in to Persona</h1>
+        <p className="auth-eyebrow">
+          {isLogin ? "Welcome back" : "Get started"}
+        </p>
+        <h1 className="auth-title">
+          {isLogin ? "Sign in to Persona" : "Create your account"}
+        </h1>
         <p className="auth-subtitle">
           Chat with AI personas of your favorite creators
         </p>
@@ -144,7 +172,82 @@ export default function AuthPage({ onSuccess }: AuthPageProps) {
           <p className="auth-subtitle">Sign-in is temporarily unavailable.</p>
         )}
 
-        {error && <p className="error">{error}</p>}
+        {EMAIL_PASSWORD_AUTH_ENABLED && (
+          <>
+            {googleClientId && (
+              <div className="auth-divider">
+                <span>OR</span>
+              </div>
+            )}
+
+            <form className="auth-form" onSubmit={handleSubmit}>
+              {!isLogin && (
+                <label className="field">
+                  <span className="field-label">Name</span>
+                  <input
+                    placeholder="Your name"
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    required
+                  />
+                </label>
+              )}
+
+              <label className="field">
+                <span className="field-label">Email</span>
+                <input
+                  type="email"
+                  placeholder="you@example.com"
+                  value={form.email}
+                  onChange={(e) => setForm({ ...form, email: e.target.value })}
+                  required
+                />
+              </label>
+
+              <label className="field">
+                <span className="field-label">Password</span>
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  minLength={8}
+                  value={form.password}
+                  onChange={(e) =>
+                    setForm({ ...form, password: e.target.value })
+                  }
+                  required
+                />
+              </label>
+
+              {error && <p className="error">{error}</p>}
+
+              <button
+                type="submit"
+                className="btn-primary btn-auth-submit"
+                disabled={loading}
+              >
+                {loading ? "..." : isLogin ? "Sign in" : "Create account"}
+              </button>
+            </form>
+
+            <p className="auth-switch">
+              {isLogin ? "New here? " : "Already have an account? "}
+              <button
+                type="button"
+                className="text-link"
+                onClick={() => {
+                  setMode(isLogin ? "register" : "login");
+                  setError("");
+                }}
+              >
+                {isLogin ? "Create an account" : "Sign in"}
+              </button>
+            </p>
+          </>
+        )}
+
+        {!EMAIL_PASSWORD_AUTH_ENABLED && error && (
+          <p className="error">{error}</p>
+        )}
       </main>
 
       <footer className="auth-footer">

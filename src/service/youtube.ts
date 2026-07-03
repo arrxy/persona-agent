@@ -1,4 +1,6 @@
 import { YoutubeTranscript } from "youtube-transcript";
+import { ProxyAgent, fetch as undiciFetch, type RequestInit as UndiciRequestInit } from "undici";
+import { env } from "../config/env.js";
 import { creatorRequestRepository } from "../repository/CreatorRequestRepository.js";
 import { CreatorRequestStatus } from "../enums.js";
 
@@ -70,16 +72,52 @@ function mapRawTranscript(
 
 const TRANSCRIPT_LANG_TRY_ORDER = ["en", "hi", "hi-IN", "en-IN", "en-US"];
 
+let transcriptProxyFetch:
+  | ((input: RequestInfo | URL, init?: RequestInit) => Promise<Response>)
+  | undefined;
+
+function getTranscriptFetchConfig(): {
+  fetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+} {
+  if (!env.TRANSCRIPT_PROXY_URL) {
+    return {};
+  }
+
+  if (!transcriptProxyFetch) {
+    const agent = new ProxyAgent(env.TRANSCRIPT_PROXY_URL);
+    transcriptProxyFetch = (input, init) =>
+      undiciFetch(input as string | URL, {
+        ...(init as UndiciRequestInit | undefined),
+        dispatcher: agent,
+      }) as unknown as Promise<Response>;
+  }
+
+  return { fetch: transcriptProxyFetch };
+}
+
+export function logTranscriptNetworkConfig(): void {
+  if (env.TRANSCRIPT_PROXY_URL) {
+    console.log("[worker] Transcript fetches use TRANSCRIPT_PROXY_URL");
+    return;
+  }
+
+  console.warn(
+    "[worker] TRANSCRIPT_PROXY_URL not set — YouTube often blocks transcript fetches from cloud/datacenter IPs",
+  );
+}
+
 export async function getYoutubeTranscript(
   input: string,
 ): Promise<TranscriptSegment[]> {
   const videoId = extractYoutubeVideoId(input);
+  const fetchConfig = getTranscriptFetchConfig();
   let lastError: Error | undefined;
 
   for (const lang of TRANSCRIPT_LANG_TRY_ORDER) {
     try {
       const rawTranscript = await YoutubeTranscript.fetchTranscript(videoId, {
         lang,
+        ...fetchConfig,
       });
       const segments = mapRawTranscript(rawTranscript);
       if (segments.length > 0) {
@@ -91,7 +129,9 @@ export async function getYoutubeTranscript(
   }
 
   try {
-    const rawTranscript = await YoutubeTranscript.fetchTranscript(videoId);
+    const rawTranscript = await YoutubeTranscript.fetchTranscript(videoId, {
+      ...fetchConfig,
+    });
     const segments = mapRawTranscript(rawTranscript);
     if (segments.length > 0) {
       return segments;

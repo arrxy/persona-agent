@@ -20,6 +20,7 @@ export const env = {
   ACCESS_TOKEN_EXPIRY: process.env.ACCESS_TOKEN_EXPIRY ?? "15m",
   REFRESH_TOKEN_EXPIRY: process.env.REFRESH_TOKEN_EXPIRY ?? "7d",
   YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY,
+  TRANSCRIPT_PROXY_URL: process.env.TRANSCRIPT_PROXY_URL,
   WORKER_ID: process.env.WORKER_ID ?? os.hostname(),
   WORKER_POLL_INTERVAL_MS:
     Number(process.env.WORKER_POLL_INTERVAL_MS) || 30_000,

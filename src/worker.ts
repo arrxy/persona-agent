@@ -1,6 +1,7 @@
 import { env } from "./config/env.js";
 import { connectDb, disconnectDb } from "./config/db.js";
 import { processCreatorRequest } from "./jobs/processCreatorRequest.js";
+import { logTranscriptNetworkConfig } from "./service/youtube.js";
 
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 let isProcessing = false;
@@ -42,6 +43,8 @@ async function start(): Promise<void> {
   }
 
   await connectDb();
+
+  logTranscriptNetworkConfig();
 
   console.log(
     `[worker] Started (id=${env.WORKER_ID}, poll=${env.WORKER_POLL_INTERVAL_MS}ms)`,
