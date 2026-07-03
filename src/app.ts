@@ -2,7 +2,6 @@ import express, { type Express } from "express";
 import cors from "cors";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { errorHandler } from "./middleware/auth.js";
 
 export function createBaseApp(): Express {
   const app = express();
@@ -21,6 +20,7 @@ export function createBaseApp(): Express {
 }
 
 export async function mountAppRoutes(app: Express): Promise<void> {
+  const { errorHandler } = await import("./middleware/auth.js");
   const [
     { default: authRouter },
     { default: personaRouter },
