@@ -64,7 +64,9 @@ async function youtubeGet(
   return response.json() as Promise<YoutubeApiResponse>;
 }
 
-function parseIso8601Duration(duration: string): number {
+function parseIso8601Duration(duration: string | undefined | null): number {
+  if (!duration) return 0;
+
   const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
   if (!match) return 0;
 
@@ -238,7 +240,9 @@ function mapVideoItem(
   normalizedChannelId: string,
 ): ChannelVideo | null {
   const snippet = item.snippet as Record<string, unknown>;
-  const contentDetails = item.contentDetails as Record<string, string>;
+  const contentDetails = item.contentDetails as
+    | Record<string, string>
+    | undefined;
   const statistics = item.statistics as Record<string, string> | undefined;
   const videoChannelId = snippet.channelId as string;
 
@@ -257,7 +261,7 @@ function mapVideoItem(
     publishedAt: snippet.publishedAt
       ? new Date(snippet.publishedAt as string)
       : undefined,
-    durationSeconds: parseIso8601Duration(contentDetails.duration),
+    durationSeconds: parseIso8601Duration(contentDetails?.duration),
     stats: statistics
       ? {
           viewCount: Number(statistics.viewCount ?? 0),
