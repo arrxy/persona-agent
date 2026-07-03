@@ -21,6 +21,7 @@ export enum ChunkSentiment {
 
 export enum ConversationMode {
   CHAT = "chat",
+  SARCASTIC = "sarcastic",
   ASK_WITH_SOURCES = "ask_with_sources",
   ROLEPLAY = "roleplay",
   COACH = "coach",

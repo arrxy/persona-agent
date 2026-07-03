@@ -1,19 +1,25 @@
 import { useEffect, useState } from "react";
 import {
   clearAuth,
+  deleteConversation,
   fetchConversationMessages,
   fetchConversations,
+  fetchCreatorRequests,
   fetchPersonas,
   getCreatorIdFromConversation,
   getCreatorNameFromConversation,
   getStoredUser,
+  normalizeChatMode,
   sendChat,
   submitCreatorRequest,
   type ChatMessage,
+  type ChatMode,
   type ConversationSummary,
+  type CreatorRequestSummary,
   type Persona,
   type User,
 } from "./api";
+import { isActiveCreatorRequest } from "./utils";
 import AuthPage from "./components/AuthPage";
 import ChatView from "./components/ChatView";
 import CreatePersonaModal from "./components/CreatePersonaModal";
@@ -26,7 +32,11 @@ export default function App() {
   const [user, setUser] = useState<User | null>(getStoredUser());
   const [mainView, setMainView] = useState<MainView>("picker");
 
-  const [personas, setPersonas] = useState<Persona[]>([]);
+  const [pinnedPersonas, setPinnedPersonas] = useState<Persona[]>([]);
+  const [explorePersonas, setExplorePersonas] = useState<Persona[]>([]);
+  const [creatorRequests, setCreatorRequests] = useState<CreatorRequestSummary[]>(
+    [],
+  );
   const [personaSearch, setPersonaSearch] = useState("");
   const [historySearch, setHistorySearch] = useState("");
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
@@ -42,6 +52,7 @@ export default function App() {
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState("");
   const [showSources, setShowSources] = useState<number | null>(null);
+  const [chatMode, setChatMode] = useState<ChatMode>("chat");
 
   const [createOpen, setCreateOpen] = useState(false);
   const [channelUrl, setChannelUrl] = useState("");
@@ -50,22 +61,45 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
     void refreshData();
-    const interval = setInterval(() => void refreshData(), 15000);
-    return () => clearInterval(interval);
   }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const hasActiveRequests = creatorRequests.some(isActiveCreatorRequest);
+    const intervalMs = hasActiveRequests ? 3000 : 15000;
+    const interval = setInterval(() => void refreshData(), intervalMs);
+    return () => clearInterval(interval);
+  }, [user, creatorRequests]);
 
   async function refreshData() {
     try {
-      const [nextPersonas, nextConversations] = await Promise.all([
+      const [personaResult, nextConversations, nextRequests] = await Promise.all([
         fetchPersonas(),
         fetchConversations(),
+        fetchCreatorRequests(),
       ]);
-      setPersonas(nextPersonas);
+      setPinnedPersonas(personaResult.pinned);
+      setExplorePersonas(personaResult.creators);
       setConversations(nextConversations);
+      setCreatorRequests(nextRequests);
     } catch {
       /* ignore background refresh errors */
     }
   }
+
+  const allPersonas = [...pinnedPersonas, ...explorePersonas];
+
+  const pendingPersonas = creatorRequests.filter(
+    (request) =>
+      isActiveCreatorRequest(request) ||
+      (request.status === "failed" &&
+        !allPersonas.some((persona) => {
+          const creator = request.creatorId;
+          if (!creator || typeof creator === "string") return false;
+          return persona.id === creator._id;
+        })),
+  );
 
   function handleLogout() {
     clearAuth();
@@ -75,6 +109,7 @@ export default function App() {
     setConversationId(undefined);
     setActiveConversationId(undefined);
     setMessages([]);
+    setChatMode("chat");
   }
 
   function startNewChat() {
@@ -85,6 +120,7 @@ export default function App() {
     setMessages([]);
     setChatError("");
     setPersonaSearch("");
+    setChatMode("chat");
   }
 
   function selectPersona(persona: Persona) {
@@ -93,6 +129,7 @@ export default function App() {
     setActiveConversationId(undefined);
     setMessages([]);
     setChatError("");
+    setChatMode("chat");
     setMainView("chat");
   }
 
@@ -105,7 +142,7 @@ export default function App() {
     try {
       const result = await fetchConversationMessages(conversation._id);
       const persona =
-        personas.find((item) => item.id === creatorId) ??
+        allPersonas.find((item) => item.id === creatorId) ??
         ({
           id: creatorId,
           name: getCreatorNameFromConversation(conversation),
@@ -114,6 +151,7 @@ export default function App() {
       setSelectedPersona(persona);
       setConversationId(conversation._id);
       setActiveConversationId(conversation._id);
+      setChatMode(normalizeChatMode(result.conversation.mode));
       setMessages(
         result.messages
           .filter((message) => message.role !== "system")
@@ -147,9 +185,11 @@ export default function App() {
         creatorId: selectedPersona.id,
         message: userMessage,
         conversationId,
+        mode: chatMode,
       });
       setConversationId(result.conversationId);
       setActiveConversationId(result.conversationId);
+      setChatMode(normalizeChatMode(result.mode));
       setMessages((prev) => [
         ...prev,
         {
@@ -166,15 +206,36 @@ export default function App() {
     }
   }
 
+  async function handleDeleteConversation(conversationId: string) {
+    if (!window.confirm("Delete this chat?")) return;
+
+    try {
+      await deleteConversation(conversationId);
+      setConversations((prev) =>
+        prev.filter((conversation) => conversation._id !== conversationId),
+      );
+
+      if (activeConversationId === conversationId) {
+        startNewChat();
+      }
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Failed to delete chat");
+    }
+  }
+
   async function handleCreatePersona(event: React.FormEvent) {
     event.preventDefault();
     if (!channelUrl.trim()) return;
     setCreateLoading(true);
     try {
-      await submitCreatorRequest(channelUrl.trim());
+      const request = await submitCreatorRequest(channelUrl.trim());
+      setCreatorRequests((prev) => {
+        const withoutDuplicate = prev.filter((item) => item._id !== request._id);
+        return [request, ...withoutDuplicate];
+      });
       setChannelUrl("");
       setCreateOpen(false);
-      await refreshData();
+      void refreshData();
     } catch (error) {
       alert(error instanceof Error ? error.message : "Failed to create persona");
     } finally {
@@ -196,13 +257,18 @@ export default function App() {
         onHistorySearchChange={setHistorySearch}
         onNewChat={startNewChat}
         onSelectConversation={(conversation) => void openConversation(conversation)}
+        onDeleteConversation={(conversationId) =>
+          void handleDeleteConversation(conversationId)
+        }
         onLogout={handleLogout}
       />
 
       <main className="main-panel">
         {mainView === "picker" ? (
           <PersonaPicker
-            personas={personas}
+            pinnedPersonas={pinnedPersonas}
+            explorePersonas={explorePersonas}
+            pendingRequests={pendingPersonas}
             search={personaSearch}
             onSearchChange={setPersonaSearch}
             onSelect={selectPersona}
@@ -217,10 +283,18 @@ export default function App() {
               loading={chatLoading}
               error={chatError}
               showSources={showSources}
+              chatMode={chatMode}
+              canDelete={Boolean(conversationId)}
               onInputChange={setInput}
+              onChatModeChange={setChatMode}
               onSend={handleSend}
               onToggleSources={(index) =>
                 setShowSources(showSources === index ? null : index)
+              }
+              onDelete={
+                conversationId
+                  ? () => void handleDeleteConversation(conversationId)
+                  : undefined
               }
             />
           )

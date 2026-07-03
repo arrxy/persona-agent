@@ -1,3 +1,5 @@
+import type { CreatorRequestSummary } from "./api";
+
 export function getInitials(name: string): string {
   return name
     .split(/\s+/)
@@ -19,6 +21,57 @@ export function formatFollowers(count?: number): string {
     return `${(count / 1_000).toFixed(count >= 10_000 ? 0 : 1)}K`;
   }
   return String(count);
+}
+
+export function getPendingPersonaName(request: CreatorRequestSummary): string {
+  const creator = request.creatorId;
+  if (creator && typeof creator !== "string") {
+    if (creator.name?.trim()) return creator.name;
+    if (creator.handle?.trim()) return creator.handle;
+  }
+
+  const handleMatch = request.inputChannelUrl.match(/@([^/?#]+)/);
+  if (handleMatch?.[1]) return handleMatch[1];
+
+  try {
+    const hostname = new URL(request.inputChannelUrl).hostname;
+    if (hostname.includes("youtube")) return "YouTube channel";
+  } catch {
+    /* ignore invalid URLs */
+  }
+
+  return "New persona";
+}
+
+export function getPendingPersonaAvatar(
+  request: CreatorRequestSummary,
+): string | undefined {
+  const creator = request.creatorId;
+  if (creator && typeof creator !== "string") {
+    return creator.avatarUrl;
+  }
+  return undefined;
+}
+
+export function getCreatorRequestStatusLabel(
+  status: CreatorRequestSummary["status"],
+): string {
+  switch (status) {
+    case "pending":
+      return "Queued";
+    case "processing":
+      return "Adding…";
+    case "failed":
+      return "Failed";
+    default:
+      return "Adding…";
+  }
+}
+
+export function isActiveCreatorRequest(
+  request: CreatorRequestSummary,
+): boolean {
+  return request.status === "pending" || request.status === "processing";
 }
 
 export function formatRelativeTime(date: string | Date): string {

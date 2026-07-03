@@ -7,8 +7,14 @@ export function transcriptLanguageToReply(
   language: TranscriptLanguage | string | undefined,
 ): ReplyLanguage {
   if (language === "hi") return "hi";
-  if (language === "mixed") return "hinglish";
+  if (language === "mixed" || language === "hinglish") return "hinglish";
   return "en";
+}
+
+export function normalizePersonaLanguage(
+  language: string | undefined,
+): ReplyLanguage {
+  return transcriptLanguageToReply(language as TranscriptLanguage);
 }
 
 export function detectReplyLanguageFromText(text: string): ReplyLanguage {
@@ -51,6 +57,12 @@ export function inferReplyLanguage(
   return best;
 }
 
+export function getReplyLanguageFallback(
+  configured: ReplyLanguage,
+): ReplyLanguage {
+  return configured;
+}
+
 const DIALECT_LOCK =
   "Always use the creator's dialect — never switch to match the language the user wrote in.";
 
@@ -71,7 +83,8 @@ export function replyLanguageInstruction(language: ReplyLanguage): string {
       return [
         "Reply in Hinglish — natural Hindi-English mix in Roman script only.",
         ROMAN_SCRIPT_RULE,
-        'Example: "dekho, iPhone 16 ka camera honestly next level hai".',
+        'Example: "dekho, iPhone 16 ka camera honestly next level hai, but price thodi zyada hai".',
+        "Mix Hindi and English the way this creator does in their videos — casual, not textbook Hindi.",
         DIALECT_LOCK,
         "Even if the user asks in pure English or Devanagari, respond in Roman Hinglish.",
       ].join(" ");

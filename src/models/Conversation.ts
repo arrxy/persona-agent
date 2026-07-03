@@ -8,6 +8,8 @@ export interface IConversation {
   title?: string;
 
   mode: ConversationMode;
+
+  deletedAt?: Date | null;
 }
 
 export interface IConversationDocument extends IConversation, Document {
@@ -42,11 +44,18 @@ const conversationSchema = new Schema<IConversationDocument>(
       default: ConversationMode.CHAT,
       required: true,
     },
+
+    deletedAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
   },
   { timestamps: true },
 );
 
 conversationSchema.index({ userId: 1, updatedAt: -1 });
+conversationSchema.index({ userId: 1, deletedAt: 1, updatedAt: -1 });
 conversationSchema.index({ creatorId: 1, updatedAt: -1 });
 
 export const Conversation: Model<IConversationDocument> = mongoose.models.Conversation ?? mongoose.model<IConversationDocument>("Conversation", conversationSchema);

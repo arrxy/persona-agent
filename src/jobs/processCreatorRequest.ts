@@ -21,6 +21,7 @@ import {
   scoreCreatorPresence,
 } from "../service/youtube/videoSelection.js";
 import { embedVideoTranscript } from "../service/ingestion/embedVideo.js";
+import { normalizePersonaLanguage } from "../service/persona/language.js";
 import { getYoutubeTranscript } from "../service/youtube.js";
 import type { ICreatorDocument } from "../models/Creator.js";
 
@@ -231,7 +232,7 @@ export async function processCreatorRequest(workerId: string): Promise<boolean> 
 
     const dominantLanguage = languageBreakdown[0]?._id;
     if (typeof dominantLanguage === "string") {
-      creator.personaConfig.language = dominantLanguage;
+      creator.personaConfig.language = normalizePersonaLanguage(dominantLanguage);
     }
 
     await embedSelectedCreatorVideos(creator);

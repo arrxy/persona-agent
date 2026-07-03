@@ -21,6 +21,9 @@ export interface ICreator {
 
   personaStatus: PersonaStatus;
 
+  isPinned: boolean;
+  pinnedOrder?: number;
+
   stats?: {
     subscriberCount?: number;
     videoCount?: number;
@@ -102,6 +105,18 @@ const creatorSchema = new Schema<ICreatorDocument>(
       enum: Object.values(PersonaStatus),
       default: PersonaStatus.NOT_STARTED,
       required: true,
+    },
+
+    isPinned: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    pinnedOrder: {
+      type: Number,
+      min: 0,
+      max: 2,
     },
 
     stats: {
@@ -197,6 +212,7 @@ const creatorSchema = new Schema<ICreatorDocument>(
 );
 
 creatorSchema.index({ personaStatus: 1 });
+creatorSchema.index({ isPinned: 1, pinnedOrder: 1 });
 creatorSchema.index({ handle: 1 });
 creatorSchema.index({ "ingestion.lastIngestedAt": 1 });
 

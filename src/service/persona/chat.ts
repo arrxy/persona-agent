@@ -8,7 +8,7 @@ import { AppError } from "../../utils/errors.js";
 import { extractAndStoreMemories } from "../memory/extract.js";
 import { searchUserMemories } from "../memory/search.js";
 import { searchCreatorChunks } from "../qdrant/search.js";
-import { buildChatMessages } from "./buildContext.js";
+import { buildChatMessages, getChatPromptVersion, getChatTemperature } from "./buildContext.js";
 
 const openai = new OpenAI({ apiKey: env.OPEN_AI_KEY });
 
@@ -23,6 +23,7 @@ export interface ChatInput {
   creatorId: string;
   conversationId?: string;
   message: string;
+  mode?: ConversationMode;
 }
 
 export interface ChatSource {
@@ -37,6 +38,13 @@ export interface ChatResult {
   conversationId: string;
   reply: string;
   sources: ChatSource[];
+  mode: ConversationMode;
+}
+
+function resolveChatMode(mode?: ConversationMode): ConversationMode {
+  return mode === ConversationMode.SARCASTIC
+    ? ConversationMode.SARCASTIC
+    : ConversationMode.CHAT;
 }
 
 async function getOrCreateConversation(params: {
@@ -44,16 +52,23 @@ async function getOrCreateConversation(params: {
   creatorId: string;
   conversationId?: string;
   message: string;
+  mode: ConversationMode;
 }) {
   if (params.conversationId) {
     const conversation = await Conversation.findOne({
       _id: params.conversationId,
       userId: params.userId,
       creatorId: params.creatorId,
+      deletedAt: null,
     });
 
     if (!conversation) {
       throw new AppError(404, "Conversation not found");
+    }
+
+    if (conversation.mode !== params.mode) {
+      conversation.mode = params.mode;
+      await conversation.save();
     }
 
     return conversation;
@@ -62,7 +77,7 @@ async function getOrCreateConversation(params: {
   return Conversation.create({
     userId: params.userId,
     creatorId: params.creatorId,
-    mode: ConversationMode.CHAT,
+    mode: params.mode,
     title: params.message.slice(0, 80),
   });
 }
@@ -75,14 +90,19 @@ export async function chatWithPersona(input: ChatInput): Promise<ChatResult> {
     throw new AppError(404, "Creator not found");
   }
 
+  const chatMode = resolveChatMode(input.mode);
+
   const conversation = await getOrCreateConversation({
     userId: input.userId,
     creatorId: input.creatorId,
     conversationId: input.conversationId,
     message: input.message,
+    mode: chatMode,
   });
 
   const conversationId = conversation._id.toString();
+  const temperature = getChatTemperature(chatMode);
+  const promptVersion = getChatPromptVersion(chatMode);
 
   const [creatorChunks, userMemories, recentMessages] = await Promise.all([
     searchCreatorChunks({
@@ -108,11 +128,12 @@ export async function chatWithPersona(input: ChatInput): Promise<ChatResult> {
     userMemories,
     recentMessages,
     userMessage: input.message,
+    mode: chatMode,
   });
 
   const completion = await openai.chat.completions.create({
     model: env.CHAT_MODEL,
-    temperature: 0.7,
+    temperature,
     messages,
   });
 
@@ -143,8 +164,8 @@ export async function chatWithPersona(input: ChatInput): Promise<ChatResult> {
     },
     generation: {
       model: env.CHAT_MODEL,
-      temperature: 0.7,
-      promptVersion: "persona-chat-v1",
+      temperature,
+      promptVersion,
     },
     safety: {
       usedDisclaimer: creator.personaConfig.identityPolicy.mustDiscloseFanMade,
@@ -179,5 +200,6 @@ export async function chatWithPersona(input: ChatInput): Promise<ChatResult> {
     conversationId,
     reply,
     sources,
+    mode: chatMode,
   };
 }

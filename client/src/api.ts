@@ -21,6 +21,39 @@ export interface Persona {
   subscriberCount?: number;
   selectedVideoCount?: number;
   personaStatus?: string;
+  isPinned?: boolean;
+  pinnedOrder?: number;
+}
+
+export interface PersonasResponse {
+  pinned: Persona[];
+  creators: Persona[];
+}
+
+export type CreatorRequestStatus =
+  | "pending"
+  | "processing"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface CreatorRequestSummary {
+  _id: string;
+  inputChannelUrl: string;
+  status: CreatorRequestStatus;
+  message?: string;
+  error?: { code?: string; message: string };
+  creatorId?:
+    | {
+        _id: string;
+        name?: string;
+        handle?: string;
+        avatarUrl?: string;
+        personaStatus?: string;
+      }
+    | string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface CreatorSummary {
@@ -33,9 +66,16 @@ export interface CreatorSummary {
 export interface ConversationSummary {
   _id: string;
   title?: string;
+  mode?: ChatMode;
   creatorId?: CreatorSummary | string;
   updatedAt: string;
   createdAt: string;
+}
+
+export type ChatMode = "chat" | "sarcastic";
+
+export function normalizeChatMode(mode?: string): ChatMode {
+  return mode === "sarcastic" ? "sarcastic" : "chat";
 }
 
 export interface StoredMessage {
@@ -149,16 +189,28 @@ export async function register(
   return result;
 }
 
-export async function fetchPersonas(): Promise<Persona[]> {
-  const result = await apiFetch<{ creators: Persona[] }>("/creators");
-  return result.creators;
+export async function fetchPersonas(): Promise<PersonasResponse> {
+  return apiFetch("/creators");
 }
 
-export async function submitCreatorRequest(channelUrl: string): Promise<void> {
-  await apiFetch("/youtube/creator-request", {
-    method: "POST",
-    body: JSON.stringify({ channelUrl }),
-  });
+export async function fetchCreatorRequests(): Promise<CreatorRequestSummary[]> {
+  const result = await apiFetch<{ creatorRequests: CreatorRequestSummary[] }>(
+    "/youtube/creator-requests",
+  );
+  return result.creatorRequests;
+}
+
+export async function submitCreatorRequest(
+  channelUrl: string,
+): Promise<CreatorRequestSummary> {
+  const result = await apiFetch<{ creatorRequest: CreatorRequestSummary }>(
+    "/youtube/creator-request",
+    {
+      method: "POST",
+      body: JSON.stringify({ channelUrl }),
+    },
+  );
+  return result.creatorRequest;
 }
 
 export async function fetchConversations(): Promise<ConversationSummary[]> {
@@ -177,14 +229,22 @@ export async function fetchConversationMessages(
   return apiFetch(`/persona/conversations/${conversationId}/messages`);
 }
 
+export async function deleteConversation(conversationId: string): Promise<void> {
+  await apiFetch(`/persona/conversations/${conversationId}`, {
+    method: "DELETE",
+  });
+}
+
 export async function sendChat(params: {
   creatorId: string;
   message: string;
   conversationId?: string;
+  mode?: ChatMode;
 }): Promise<{
   conversationId: string;
   reply: string;
   sources: ChatSource[];
+  mode: ChatMode;
 }> {
   return apiFetch("/persona/chat", {
     method: "POST",

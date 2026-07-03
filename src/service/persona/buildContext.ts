@@ -1,12 +1,14 @@
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions.js";
 import { env } from "../../config/env.js";
-import { MessageRole } from "../../enums.js";
+import { ConversationMode, MessageRole } from "../../enums.js";
 import type { ICreatorDocument } from "../../models/Creator.js";
 import type { IMessageDocument } from "../../models/Message.js";
 import type { CreatorChunkHit } from "../qdrant/search.js";
 import type { UserMemoryHit } from "../memory/search.js";
 import {
   getCreatorReplyLanguage,
+  getReplyLanguageFallback,
+  inferReplyLanguage,
   replyLanguageInstruction,
   type ReplyLanguage,
 } from "./language.js";
@@ -18,6 +20,7 @@ function estimateTokens(text: string): number {
 function buildSystemPrompt(
   creator: ICreatorDocument,
   replyLanguage: ReplyLanguage,
+  mode: ConversationMode,
 ): string {
   const config = creator.personaConfig;
   const lines = [
@@ -40,11 +43,16 @@ function buildSystemPrompt(
   const useFirstPerson = true;
 
   if (useFirstPerson) {
+    const openerExample =
+      replyLanguage === "hinglish" || replyLanguage === "hi"
+        ? 'Example good opener: "Dekho, mere hisaab se..."'
+        : 'Example good opener: "So here\'s my take on..."';
+
     lines.push(
       `You ARE ${creator.name} for this conversation. Respond in first person exactly as in CREATOR CONTEXT.`,
       'Always use "I", "my", "me", "we" — never "he", "they", or the creator\'s name to refer to yourself.',
       `FORBIDDEN phrases: "${creator.name} would say", "${creator.name} thinks", "he would", "they would".`,
-      'Example good opener: "So comparing your Pixel 8 to the iPhone 16, I think..."',
+      openerExample,
       "Ground opinions in CREATOR CONTEXT. If you lack evidence, say you have not covered that topic.",
     );
   } else {
@@ -55,10 +63,31 @@ function buildSystemPrompt(
     lines.push(`Tone: ${config.tone.join(", ")}.`);
   }
 
+  if (mode === ConversationMode.SARCASTIC) {
+    lines.push(
+      "STYLE MODE: SARCASTIC — this MUST read clearly different from normal chat.",
+      "Voice: blunt, roast-y, dry, dismissive — but still sound like THIS creator from CREATOR CONTEXT, not a generic snark bot.",
+      "Mirror how this creator actually talks when skeptical or roasting: word choice, rhythm, and attitude from the transcripts.",
+      "Do not use the same opener every time. No catchphrases unless they appear in CREATOR CONTEXT.",
+      "Use sarcasm, rhetorical questions, understatement, and playful insults aimed at products — not the user.",
+      "Take a strong side. No fence-sitting, no 'it depends' essays, no corporate-neutral tone.",
+      "Prefer short punchy paragraphs. One or two sharp jokes beat a polite explainer.",
+      "Still give a real answer backed by CREATOR CONTEXT — snark wraps the opinion, it doesn't replace it.",
+      "Never target protected classes, slurs, or cruel personal attacks on the user.",
+    );
+  } else {
+    lines.push(
+      "STYLE MODE: NORMAL",
+      "Be helpful and conversational while staying in the creator's voice from CREATOR CONTEXT.",
+      "Do not be sarcastic, rude, or dismissive in normal mode.",
+    );
+  }
+
   lines.push(
     "Use CREATOR CONTEXT for what the creator has said in videos.",
     "Use USER CONTEXT for what you know about this specific user.",
-    "Do not invent video quotes or specs not supported by context.",
+    "Do not invent video quotes, chip names, specs, release timelines, or product facts not in CREATOR CONTEXT.",
+    "If CREATOR CONTEXT lacks enough detail, say you haven't covered it enough — don't guess.",
   );
 
   return lines.join("\n");
@@ -99,12 +128,25 @@ export function buildChatMessages(params: {
   userMemories: UserMemoryHit[];
   recentMessages: IMessageDocument[];
   userMessage: string;
+  mode: ConversationMode;
 }): ChatCompletionMessageParam[] {
   const budget = env.CHAT_MAX_CONTEXT_TOKENS;
-  const replyLanguage = getCreatorReplyLanguage(
+  const configuredLang = getCreatorReplyLanguage(
     params.creator.personaConfig.language,
   );
-  const systemPrompt = buildSystemPrompt(params.creator, replyLanguage);
+  const replyLanguage = inferReplyLanguage(
+    params.creatorChunks.map((chunk) => ({
+      language: chunk.language,
+      text: chunk.text,
+      score: chunk.score,
+    })),
+    getReplyLanguageFallback(configuredLang),
+  );
+  const systemPrompt = buildSystemPrompt(
+    params.creator,
+    replyLanguage,
+    params.mode,
+  );
 
   let chunks = [...params.creatorChunks];
   let memories = [...params.userMemories];
@@ -118,9 +160,13 @@ export function buildChatMessages(params: {
     ].filter(Boolean);
 
     const contextBlock = contextParts.join("\n\n");
+    const modeHint =
+      params.mode === ConversationMode.SARCASTIC
+        ? "\n\nReply in SARCASTIC mode using this creator's voice from CREATOR CONTEXT — sharp opinion, no generic catchphrases."
+        : "";
     const userContent = contextBlock
-      ? `${contextBlock}\n\nUser: ${params.userMessage}`
-      : params.userMessage;
+      ? `${contextBlock}\n\nUser: ${params.userMessage}${modeHint}`
+      : `${params.userMessage}${modeHint}`;
 
     return [
       { role: "system" as const, content: systemPrompt },
@@ -153,4 +199,14 @@ export function buildChatMessages(params: {
   }
 
   return messages;
+}
+
+export function getChatTemperature(mode: ConversationMode): number {
+  return mode === ConversationMode.SARCASTIC ? 0.95 : 0.7;
+}
+
+export function getChatPromptVersion(mode: ConversationMode): string {
+  return mode === ConversationMode.SARCASTIC
+    ? "persona-chat-v3-sarcastic"
+    : "persona-chat-v3";
 }

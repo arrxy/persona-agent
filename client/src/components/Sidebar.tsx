@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import type { ConversationSummary, User } from "../api";
 import { formatRelativeTime, getInitials } from "../utils";
 
@@ -9,6 +10,7 @@ interface SidebarProps {
   onHistorySearchChange: (value: string) => void;
   onNewChat: () => void;
   onSelectConversation: (conversation: ConversationSummary) => void;
+  onDeleteConversation: (conversationId: string) => void;
   onLogout: () => void;
 }
 
@@ -28,8 +30,28 @@ export default function Sidebar({
   onHistorySearchChange,
   onNewChat,
   onSelectConversation,
+  onDeleteConversation,
   onLogout,
 }: SidebarProps) {
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!userMenuOpen) return;
+
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        userMenuRef.current &&
+        !userMenuRef.current.contains(event.target as Node)
+      ) {
+        setUserMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [userMenuOpen]);
+
   const filtered = conversations.filter((conversation) => {
     if (!historySearch.trim()) return true;
     const query = historySearch.toLowerCase();
@@ -67,32 +89,75 @@ export default function Sidebar({
               <p className="muted history-empty">No chats yet</p>
             )}
             {filtered.map((conversation) => (
-              <button
+              <div
                 key={conversation._id}
-                type="button"
-                className={`history-item ${activeConversationId === conversation._id ? "active" : ""}`}
-                onClick={() => onSelectConversation(conversation)}
+                className={`history-item-wrap ${activeConversationId === conversation._id ? "active" : ""}`}
               >
-                <div className="history-text">
-                  <span className="history-title">
-                    {conversation.title || "New conversation"}
+                <button
+                  type="button"
+                  className="history-item"
+                  onClick={() => onSelectConversation(conversation)}
+                >
+                  <div className="history-text">
+                    <span className="history-title">
+                      {conversation.title || "New conversation"}
+                    </span>
+                    <span className="history-meta">
+                      • {getCreatorLabel(conversation)}
+                    </span>
+                  </div>
+                  <span className="history-time">
+                    {formatRelativeTime(conversation.updatedAt)}
                   </span>
-                  <span className="history-meta">• {getCreatorLabel(conversation)}</span>
-                </div>
-                <span className="history-time">
-                  {formatRelativeTime(conversation.updatedAt)}
-                </span>
-              </button>
+                </button>
+                <button
+                  type="button"
+                  className="history-delete"
+                  aria-label="Delete chat"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onDeleteConversation(conversation._id);
+                  }}
+                >
+                  ×
+                </button>
+              </div>
             ))}
           </div>
         </div>
       </div>
 
-      <div className="sidebar-footer">
-        <button type="button" className="user-chip" onClick={onLogout}>
+      <div className="sidebar-footer" ref={userMenuRef}>
+        <button
+          type="button"
+          className="user-chip"
+          aria-expanded={userMenuOpen}
+          aria-haspopup="menu"
+          onClick={() => setUserMenuOpen((open) => !open)}
+        >
           <span className="user-avatar">{getInitials(user.name || "You")}</span>
-          <span>{user.name || "You"}</span>
+          <span className="user-chip-name">{user.name || "You"}</span>
         </button>
+
+        {userMenuOpen && (
+          <div className="user-menu" role="menu">
+            <div className="user-menu-header">
+              <span className="user-menu-name">{user.name || "You"}</span>
+              <span className="user-menu-email">{user.email}</span>
+            </div>
+            <button
+              type="button"
+              className="user-menu-item"
+              role="menuitem"
+              onClick={() => {
+                setUserMenuOpen(false);
+                onLogout();
+              }}
+            >
+              Log out
+            </button>
+          </div>
+        )}
       </div>
     </aside>
   );
