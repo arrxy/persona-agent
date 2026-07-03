@@ -32,7 +32,8 @@ workers:
       branch: master
       deploy_on_push: true
     dockerfile_path: Dockerfile
-    run_command: /docker-entrypoint.sh node dist/worker.js
+    # DO run_command replaces Docker ENTRYPOINT — must invoke dotenvx explicitly
+    run_command: ./node_modules/.bin/dotenvx run -f .env.production -- node dist/worker.js
     instance_count: 1
     instance_size_slug: basic-xxs
     envs:
