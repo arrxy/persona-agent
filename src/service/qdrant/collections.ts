@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { env } from "../../config/env.js";
+import { qdrantFetch } from "./client.js";
 
 export interface QdrantChunkPayload {
   creatorId: string;
@@ -19,30 +20,6 @@ export interface QdrantChunkPoint {
   pointId: string;
   vector: number[];
   payload: QdrantChunkPayload;
-}
-
-function getBaseUrl(): string {
-  return env.QDRANT_URL.replace(/\/$/, "");
-}
-
-async function qdrantFetch<T>(
-  path: string,
-  init?: RequestInit,
-): Promise<T> {
-  const response = await fetch(`${getBaseUrl()}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...init?.headers,
-    },
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Qdrant API error (${response.status}): ${body}`);
-  }
-
-  return response.json() as Promise<T>;
 }
 
 export function getCreatorCollectionName(creatorId: string): string {

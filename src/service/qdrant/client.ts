@@ -10,16 +10,21 @@ function getBaseUrl(): string {
   return env.QDRANT_URL.replace(/\/$/, "");
 }
 
+function qdrantHeaders(extra?: HeadersInit): HeadersInit {
+  return {
+    "Content-Type": "application/json",
+    ...(env.QDRANT_API_KEY ? { "api-key": env.QDRANT_API_KEY } : {}),
+    ...extra,
+  };
+}
+
 export async function qdrantFetch<T>(
   path: string,
   init?: RequestInit,
 ): Promise<T> {
   const response = await fetch(`${getBaseUrl()}${path}`, {
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...init?.headers,
-    },
+    headers: qdrantHeaders(init?.headers),
   });
 
   if (!response.ok) {

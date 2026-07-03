@@ -24,6 +24,7 @@ export const env = {
   WORKER_POLL_INTERVAL_MS:
     Number(process.env.WORKER_POLL_INTERVAL_MS) || 30_000,
   QDRANT_URL: process.env.QDRANT_URL ?? "http://localhost:6333",
+  QDRANT_API_KEY: process.env.QDRANT_API_KEY,
   EMBEDDING_MODEL: process.env.EMBEDDING_MODEL ?? "text-embedding-3-small",
   EMBEDDING_DIMENSIONS: Number(process.env.EMBEDDING_DIMENSIONS) || 1536,
   CHUNK_TARGET_WORDS: Number(process.env.CHUNK_TARGET_WORDS) || 400,
