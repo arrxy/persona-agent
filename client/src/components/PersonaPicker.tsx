@@ -6,7 +6,6 @@ import {
   getInitials,
   getPendingPersonaAvatar,
   getPendingPersonaName,
-  isActiveCreatorRequest,
 } from "../utils";
 
 interface PersonaPickerProps {
@@ -73,12 +72,11 @@ function PendingPersonaRow({ request }: { request: CreatorRequestSummary }) {
   const name = getPendingPersonaName(request);
   const avatarUrl = getPendingPersonaAvatar(request);
   const isFailed = request.status === "failed";
-  const isActive = isActiveCreatorRequest(request);
 
   return (
     <div
       className={`persona-row persona-row-pending ${isFailed ? "persona-row-failed" : ""}`}
-      aria-disabled={!isFailed}
+      aria-disabled
     >
       <div className="persona-avatar-wrap">
         {avatarUrl ? (
@@ -88,7 +86,6 @@ function PendingPersonaRow({ request }: { request: CreatorRequestSummary }) {
             {getInitials(name)}
           </span>
         )}
-        {isActive && <span className="persona-avatar-ring" aria-hidden />}
       </div>
 
       <div className="persona-info">
@@ -96,14 +93,13 @@ function PendingPersonaRow({ request }: { request: CreatorRequestSummary }) {
         <span className="persona-desc">
           {isFailed
             ? request.error?.message ?? "Ingestion failed"
-            : "Building persona from YouTube"}
+            : "Added within 24–48 hours of request"}
         </span>
       </div>
 
       <span
         className={`persona-badge ${isFailed ? "persona-badge-failed" : "persona-badge-pending"}`}
       >
-        {isActive && <span className="spinner" aria-hidden />}
         {getCreatorRequestStatusLabel(request.status)}
       </span>
     </div>
@@ -198,6 +194,12 @@ export default function PersonaPicker({
           {!hasResults && (
             <p className="muted persona-empty">
               No personas ready yet. Create one below.
+            </p>
+          )}
+
+          {filteredPending.length > 0 && (
+            <p className="persona-section-label persona-request-disclaimer">
+              Requested creators are added within 24–48 hours.
             </p>
           )}
 

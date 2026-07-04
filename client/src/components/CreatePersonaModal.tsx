@@ -22,7 +22,8 @@ export default function CreatePersonaModal({
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h2>Create a new persona</h2>
         <p className="muted">
-          Paste a YouTube channel URL. Ingestion runs in the background.
+          Paste a YouTube channel URL. Creators are added within 24–48 hours of
+          request.
         </p>
         <form onSubmit={onSubmit}>
           <input

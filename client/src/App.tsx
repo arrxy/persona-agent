@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  AuthError,
   clearAuth,
   deleteConversation,
   fetchConversationMessages,
@@ -10,6 +11,7 @@ import {
   getCreatorNameFromConversation,
   getStoredUser,
   normalizeChatMode,
+  onAuthExpired,
   sendChat,
   submitCreatorRequest,
   type ChatMessage,
@@ -64,13 +66,21 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
-    if (!user) return;
-
-    const hasActiveRequests = creatorRequests.some(isActiveCreatorRequest);
-    const intervalMs = hasActiveRequests ? 3000 : 15000;
-    const interval = setInterval(() => void refreshData(), intervalMs);
-    return () => clearInterval(interval);
-  }, [user, creatorRequests]);
+    return onAuthExpired(() => {
+      setUser(null);
+      setMainView("picker");
+      setSelectedPersona(null);
+      setConversationId(undefined);
+      setActiveConversationId(undefined);
+      setMessages([]);
+      setPinnedPersonas([]);
+      setExplorePersonas([]);
+      setCreatorRequests([]);
+      setConversations([]);
+      setChatError("");
+      setChatMode("chat");
+    });
+  }, []);
 
   async function refreshData() {
     try {
@@ -83,23 +93,23 @@ export default function App() {
       setExplorePersonas(personaResult.creators);
       setConversations(nextConversations);
       setCreatorRequests(nextRequests);
-    } catch {
-      /* ignore background refresh errors */
+    } catch (error) {
+      if (error instanceof AuthError) return;
+      /* ignore other background refresh errors */
     }
   }
 
   const allPersonas = [...pinnedPersonas, ...explorePersonas];
 
-  const pendingPersonas = creatorRequests.filter(
-    (request) =>
-      isActiveCreatorRequest(request) ||
-      (request.status === "failed" &&
-        !allPersonas.some((persona) => {
-          const creator = request.creatorId;
-          if (!creator || typeof creator === "string") return false;
-          return persona.id === creator._id;
-        })),
-  );
+  const pendingPersonas = creatorRequests.filter((request) => {
+    const creator = request.creatorId;
+    const alreadyAdded = allPersonas.some((persona) => {
+      if (!creator || typeof creator === "string") return false;
+      return persona.id === creator._id;
+    });
+    if (alreadyAdded) return false;
+    return isActiveCreatorRequest(request) || request.status === "failed";
+  });
 
   function handleLogout() {
     clearAuth();

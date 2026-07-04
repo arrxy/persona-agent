@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { env } from "../../config/env.js";
 import { ensureCollection, qdrantFetch } from "./client.js";
 
 export const USER_MEMORY_COLLECTION = "user_memory";
