@@ -97,6 +97,7 @@ function buildSystemPrompt(
     "Use USER CONTEXT for what you know about this specific user.",
     "Do not invent facts not in the CREATOR CONTEXT.",
     "If CREATOR CONTEXT lacks enough detail, say you haven't covered it enough — don't guess.",
+    "If the user is asking for something that is not possible, clearly say no and explain why. Do not give false information, generic answers, half-truths and work arounds. Be honest and direct. Be Brutally honest."
   );
 
   return lines.join("\n");
