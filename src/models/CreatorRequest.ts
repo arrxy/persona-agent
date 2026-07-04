@@ -9,6 +9,8 @@ export interface ICreatorRequest {
 
   creatorId?: Types.ObjectId;
 
+  reingest?: boolean;
+
   status: CreatorRequestStatus;
 
   message?: string;
@@ -58,6 +60,11 @@ const creatorRequestSchema = new Schema<ICreatorRequestDocument>(
       type: Schema.Types.ObjectId,
       ref: "Creator",
       index: true,
+    },
+
+    reingest: {
+      type: Boolean,
+      default: false,
     },
 
     status: {

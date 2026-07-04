@@ -1,12 +1,12 @@
 import {
-  CreatorRequestStatus,
   TranscriptSource,
   VideoProcessingStatus,
 } from "../enums.js";
-import { CreatorRequest } from "../models/CreatorRequest.js";
-import { CreatorVideo } from "../models/CreatorVideo.js";
-import { TranscriptChunk } from "../models/TranscriptChunk.js";
+import { env } from "../config/env.js";
+import { creatorRepository } from "../repository/CreatorRepository.js";
 import { creatorRequestRepository } from "../repository/CreatorRequestRepository.js";
+import { creatorVideoRepository } from "../repository/CreatorVideoRepository.js";
+import { transcriptChunkRepository } from "../repository/TranscriptChunkRepository.js";
 import {
   listChannelUploads,
   resolveChannel,
@@ -15,13 +15,17 @@ import {
   upsertCreatorFromChannel,
   upsertCreatorVideos,
 } from "../service/youtube/ingestion.js";
-import { embedSelectedCreatorVideos } from "../service/ingestion/embedVideo.js";
 import {
-  getTranscriptCandidateVideos,
+  buildMergedCandidateList,
+  getTranscriptCandidateBatch,
   scoreCreatorPresence,
   selectFallbackVideos,
 } from "../service/youtube/videoSelection.js";
-import { embedVideoTranscript } from "../service/ingestion/embedVideo.js";
+import {
+  embedVideoTranscript,
+  embedSelectedCreatorVideos,
+} from "../service/ingestion/embedVideo.js";
+import { buildCreatorPersonaProfile } from "../service/ingestion/personaProfile.js";
 import { normalizePersonaLanguage } from "../service/persona/language.js";
 import { getYoutubeTranscript } from "../service/youtube.js";
 import type { ICreatorDocument } from "../models/Creator.js";
@@ -32,6 +36,10 @@ function getRetryDelayMs(attempts: number): number {
   return Math.min(60_000 * 2 ** Math.max(attempts - 1, 0), 3_600_000);
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function handleJobFailure(
   requestId: string,
   attempts: number,
@@ -39,14 +47,11 @@ async function handleJobFailure(
   message: string,
 ): Promise<void> {
   if (attempts < MAX_ATTEMPTS) {
-    await CreatorRequest.findByIdAndUpdate(requestId, {
-      $set: {
-        status: CreatorRequestStatus.PENDING,
-        error: { code, message },
-        "processing.nextRetryAt": new Date(
-          Date.now() + getRetryDelayMs(attempts),
-        ),
-      },
+    await creatorRequestRepository.scheduleRetry({
+      requestId,
+      code,
+      message,
+      nextRetryAt: new Date(Date.now() + getRetryDelayMs(attempts)),
     });
     return;
   }
@@ -60,17 +65,25 @@ async function handleJobFailure(
 
 async function fetchAndScoreVideo(params: {
   creator: ICreatorDocument;
-  creatorId: string;
   youtubeVideoId: string;
   creatorName: string;
   handle?: string;
-}): Promise<void> {
-  const video = await CreatorVideo.findOne({
-    creatorId: params.creatorId,
-    youtubeVideoId: params.youtubeVideoId,
-  });
+  skipIfTranscriptAvailable?: boolean;
+}): Promise<boolean> {
+  const video = await creatorVideoRepository.findByCreatorAndYoutubeVideoId(
+    params.creator._id,
+    params.youtubeVideoId,
+  );
 
-  if (!video) return;
+  if (!video) return false;
+
+  if (
+    params.skipIfTranscriptAvailable &&
+    video.transcript?.available &&
+    video.processing?.status !== VideoProcessingStatus.FAILED
+  ) {
+    return false;
+  }
 
   try {
     const segments = await getYoutubeTranscript(params.youtubeVideoId);
@@ -106,7 +119,7 @@ async function fetchAndScoreVideo(params: {
     video.processing = {
       status: VideoProcessingStatus.TRANSCRIPT_FETCHED,
     };
-    await video.save();
+    await creatorVideoRepository.save(video);
 
     console.log(
       `[worker] Video ${params.youtubeVideoId}: transcript ok, selected=${selection.selectedForPersona}, score=${selection.rankScore.toFixed(2)}${selection.reason ? `, reason=${selection.reason}` : ""}`,
@@ -126,11 +139,11 @@ async function fetchAndScoreVideo(params: {
           status: VideoProcessingStatus.TRANSCRIPT_FETCHED,
           error: `embed_failed: ${embedMsg}`,
         };
-        await video.save();
+        await creatorVideoRepository.save(video);
       }
     }
 
-    return;
+    return true;
   } catch (error) {
     video.selection = {
       selectedForPersona: false,
@@ -141,11 +154,97 @@ async function fetchAndScoreVideo(params: {
       status: VideoProcessingStatus.FAILED,
       error: error instanceof Error ? error.message : "Transcript fetch failed",
     };
-    await video.save();
+    await creatorVideoRepository.save(video);
     console.log(
       `[worker] Video ${params.youtubeVideoId}: no transcript (${error instanceof Error ? error.message : "fetch failed"})`,
     );
+    return true;
   }
+}
+
+async function scoreCandidatesUntilTarget(params: {
+  creator: ICreatorDocument;
+  videos: Awaited<ReturnType<typeof listChannelUploads>>;
+  creatorName: string;
+  handle?: string;
+  isReingest: boolean;
+}): Promise<string[]> {
+  const mergedList = buildMergedCandidateList(
+    params.videos,
+    params.creator.ingestion.strategy,
+  );
+  const targetSeconds = params.creator.ingestion.targetTranscriptHours * 3600;
+  const batchSize = env.TRANSCRIPT_CANDIDATE_LIMIT;
+  const processedVideoIds: string[] = [];
+  let offset = 0;
+
+  while (offset < mergedList.length) {
+    const batch = getTranscriptCandidateBatch(
+      params.videos,
+      params.creator.ingestion.strategy,
+      offset,
+      batchSize,
+    );
+
+    if (batch.length === 0) break;
+
+    console.log(
+      `[worker] Transcript batch offset=${offset}, size=${batch.length} (target=${params.creator.ingestion.targetTranscriptHours}h)`,
+    );
+
+    for (const candidate of batch) {
+      if (processedVideoIds.includes(candidate.youtubeVideoId)) continue;
+      processedVideoIds.push(candidate.youtubeVideoId);
+
+      const fetched = await fetchAndScoreVideo({
+        creator: params.creator,
+        youtubeVideoId: candidate.youtubeVideoId,
+        creatorName: params.creatorName,
+        handle: params.handle,
+        skipIfTranscriptAvailable: params.isReingest,
+      });
+
+      if (fetched && env.TRANSCRIPT_FETCH_DELAY_MS > 0) {
+        await sleep(env.TRANSCRIPT_FETCH_DELAY_MS);
+      }
+    }
+
+    const collectedSeconds =
+      await creatorVideoRepository.sumSelectedTranscriptSeconds(
+        params.creator._id,
+      );
+    const remainingVideoIds = mergedList
+      .slice(offset + batchSize)
+      .map((video) => video.youtubeVideoId);
+    const remainingNeedTranscript =
+      await creatorVideoRepository.countNeedingTranscript(
+        params.creator._id,
+        remainingVideoIds,
+      );
+    const targetMet = collectedSeconds >= targetSeconds;
+
+    if (targetMet && !params.isReingest) {
+      console.log(
+        `[worker] Target transcript hours reached (${(collectedSeconds / 3600).toFixed(1)}h)`,
+      );
+      break;
+    }
+
+    if (targetMet && params.isReingest && remainingNeedTranscript === 0) {
+      console.log(
+        `[worker] Re-ingest complete: target hours met and no remaining videos need transcripts`,
+      );
+      break;
+    }
+
+    offset += batchSize;
+  }
+
+  console.log(
+    `[worker] Scored ${processedVideoIds.length} candidate(s)`,
+  );
+
+  return mergedList.map((video) => video.youtubeVideoId);
 }
 
 export async function processCreatorRequest(
@@ -160,9 +259,10 @@ export async function processCreatorRequest(
 
   const requestId = request._id.toString();
   const attempts = request.processing.attempts;
+  const isReingest = Boolean(request.reingest);
 
   console.log(
-    `[worker] Claimed request ${requestId} (attempt ${attempts}, channel=${request.inputChannelUrl})`,
+    `[worker] Claimed request ${requestId} (attempt ${attempts}, channel=${request.inputChannelUrl}${isReingest ? ", reingest" : ""})`,
   );
 
   try {
@@ -171,7 +271,18 @@ export async function processCreatorRequest(
       `[worker] Resolved channel "${channel.name}" (${channel.channelId}, handle=${channel.handle ?? "none"})`,
     );
 
-    const creator = await upsertCreatorFromChannel(channel);
+    let creator: ICreatorDocument;
+
+    if (isReingest && request.creatorId) {
+      const existing = await creatorRepository.findById(request.creatorId);
+      if (!existing) {
+        throw new Error("Re-ingest target creator not found");
+      }
+      creator = existing;
+      console.log(`[worker] Re-ingesting existing creator ${creator.name}`);
+    } else {
+      creator = await upsertCreatorFromChannel(channel);
+    }
 
     await creatorRequestRepository.attachCreator({
       requestId,
@@ -179,7 +290,8 @@ export async function processCreatorRequest(
       normalizedChannelId: channel.channelId,
     });
 
-    const sourceVideoLimit = creator.ingestion.sourceVideoLimit ?? 100;
+    const sourceVideoLimit =
+      creator.ingestion.sourceVideoLimit ?? env.DEFAULT_SOURCE_VIDEO_LIMIT;
     const videos = await listChannelUploads(
       channel.uploadsPlaylistId,
       channel.channelId,
@@ -191,34 +303,22 @@ export async function processCreatorRequest(
       `[worker] Listed ${videos.length} videos from uploads playlist`,
     );
 
-    const candidates = getTranscriptCandidateVideos(
+    const allCandidateIds = await scoreCandidatesUntilTarget({
+      creator,
       videos,
-      creator.ingestion.strategy,
-    );
-    console.log(
-      `[worker] Scoring ${candidates.length} transcript candidates (strategy=${creator.ingestion.strategy})`,
-    );
-
-    for (const candidate of candidates) {
-      await fetchAndScoreVideo({
-        creator,
-        creatorId: creator._id.toString(),
-        youtubeVideoId: candidate.youtubeVideoId,
-        creatorName: channel.name,
-        handle: channel.handle,
-      });
-    }
-
-    let selectedVideoCount = await CreatorVideo.countDocuments({
-      creatorId: creator._id,
-      "selection.selectedForPersona": true,
+      creatorName: channel.name,
+      handle: channel.handle,
+      isReingest,
     });
 
-    if (selectedVideoCount === 0) {
-      const transcriptCount = await CreatorVideo.countDocuments({
-        creatorId: creator._id,
-        "transcript.available": true,
-      });
+    let selectedBeforeDeselect = await creatorVideoRepository.countSelected(
+      creator._id,
+    );
+
+    if (selectedBeforeDeselect === 0) {
+      const transcriptCount = await creatorVideoRepository.countWithTranscript(
+        creator._id,
+      );
 
       console.log(
         `[worker] No videos passed selection threshold (${transcriptCount} with transcripts)`,
@@ -230,66 +330,35 @@ export async function processCreatorRequest(
         );
       }
 
-      selectedVideoCount = await selectFallbackVideos({
+      selectedBeforeDeselect = await selectFallbackVideos({
         creatorId: creator._id.toString(),
       });
       console.log(
-        `[worker] Fallback selected ${selectedVideoCount} video(s) by rank/views`,
+        `[worker] Fallback selected ${selectedBeforeDeselect} video(s) by rank/views`,
       );
     } else {
       console.log(
-        `[worker] ${selectedVideoCount} video(s) passed selection threshold`,
+        `[worker] ${selectedBeforeDeselect} video(s) passed selection threshold`,
       );
     }
 
-    await CreatorVideo.updateMany(
-      {
-        creatorId: creator._id,
-        youtubeVideoId: {
-          $nin: candidates.map((video) => video.youtubeVideoId),
-        },
-      },
-      {
-        $set: {
-          "selection.selectedForPersona": false,
-          "selection.reason": "not_in_top_candidates",
-        },
-      },
+    await creatorVideoRepository.deselectOutsideCandidates(
+      creator._id,
+      allCandidateIds,
+    );
+
+    const selectedVideoCount = await creatorVideoRepository.countSelected(
+      creator._id,
     );
 
     creator.ingestion.selectedVideoCount = selectedVideoCount;
-    creator.ingestion.collectedTranscriptSeconds = await CreatorVideo.aggregate(
-      [
-        {
-          $match: {
-            creatorId: creator._id,
-            "selection.selectedForPersona": true,
-            "transcript.available": true,
-          },
-        },
-        {
-          $group: {
-            _id: null,
-            totalSeconds: { $sum: "$transcript.totalSeconds" },
-          },
-        },
-      ],
-    ).then((rows) => rows[0]?.totalSeconds ?? 0);
+    creator.ingestion.collectedTranscriptSeconds =
+      await creatorVideoRepository.sumSelectedTranscriptSeconds(creator._id);
+    creator.ingestion.lastIngestedAt = new Date();
 
-    const languageBreakdown = await CreatorVideo.aggregate([
-      {
-        $match: {
-          creatorId: creator._id,
-          "selection.selectedForPersona": true,
-          "transcript.available": true,
-        },
-      },
-      { $group: { _id: "$transcript.language", count: { $sum: 1 } } },
-      { $sort: { count: -1 } },
-    ]);
-
-    const dominantLanguage = languageBreakdown[0]?._id;
-    if (typeof dominantLanguage === "string") {
+    const dominantLanguage =
+      await creatorVideoRepository.getDominantSelectedLanguage(creator._id);
+    if (dominantLanguage) {
       creator.personaConfig.language =
         normalizePersonaLanguage(dominantLanguage);
     }
@@ -297,12 +366,20 @@ export async function processCreatorRequest(
     await embedSelectedCreatorVideos(creator);
     console.log("[worker] Embedding pass complete for selected videos");
 
-    const embeddedChunkCount = await TranscriptChunk.countDocuments({
-      creatorId: creator._id,
-      "qdrant.collectionName": { $exists: true },
-    });
+    const embeddedChunkCount =
+      await transcriptChunkRepository.countEmbeddedByCreator(creator._id);
 
-    await creator.save();
+    try {
+      await buildCreatorPersonaProfile(creator);
+      console.log("[worker] Persona profile built");
+    } catch (profileError) {
+      console.warn(
+        "[worker] Persona profile build failed:",
+        profileError instanceof Error ? profileError.message : profileError,
+      );
+    }
+
+    await creatorRepository.save(creator);
 
     const completionMessage = `Ingested ${videos.length} videos, selected ${selectedVideoCount} for persona, embedded ${embeddedChunkCount} chunks`;
 

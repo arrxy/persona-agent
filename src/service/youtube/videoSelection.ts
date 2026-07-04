@@ -1,8 +1,6 @@
 import { IngestionStrategy } from "../../enums.js";
+import { env } from "../../config/env.js";
 import type { ChannelVideo } from "./channel.js";
-
-const PRESENCE_THRESHOLD = 0.4;
-const TRANSCRIPT_CANDIDATE_LIMIT = 30;
 
 const EN_FIRST_PERSON =
   /\b(i|i'm|i've|i'll|we|we're|we've|my|mine|our|ours|us)\b/gi;
@@ -143,7 +141,7 @@ export function scoreCreatorPresence(
   const { nameWeight, firstPersonWeight } = getScoreWeights(detectedLanguage);
   const rankScore = nameScore * nameWeight + firstPersonScore * firstPersonWeight;
 
-  if (rankScore >= PRESENCE_THRESHOLD) {
+  if (rankScore >= env.PRESENCE_THRESHOLD) {
     return { selectedForPersona: true, rankScore, detectedLanguage };
   }
 
@@ -185,36 +183,60 @@ export function rankVideosByStrategy(
   return ranked;
 }
 
+/** Primary strategy ranking plus recent uploads not already included. */
+export function buildMergedCandidateList(
+  videos: ChannelVideo[],
+  strategy: IngestionStrategy,
+): ChannelVideo[] {
+  const primary = rankVideosByStrategy(videos, strategy);
+  const seen = new Set<string>();
+  const merged: ChannelVideo[] = [];
+
+  for (const video of primary) {
+    if (seen.has(video.youtubeVideoId)) continue;
+    seen.add(video.youtubeVideoId);
+    merged.push(video);
+  }
+
+  if (strategy === IngestionStrategy.TOP_VIEWS_LONGEST) {
+    const recent = rankVideosByStrategy(videos, IngestionStrategy.RECENT);
+    for (const video of recent) {
+      if (seen.has(video.youtubeVideoId)) continue;
+      seen.add(video.youtubeVideoId);
+      merged.push(video);
+    }
+  }
+
+  return merged;
+}
+
+export function getTranscriptCandidateBatch(
+  videos: ChannelVideo[],
+  strategy: IngestionStrategy,
+  offset: number,
+  limit = env.TRANSCRIPT_CANDIDATE_LIMIT,
+): ChannelVideo[] {
+  return buildMergedCandidateList(videos, strategy).slice(offset, offset + limit);
+}
+
 export function getTranscriptCandidateVideos(
   videos: ChannelVideo[],
   strategy: IngestionStrategy,
-  limit = TRANSCRIPT_CANDIDATE_LIMIT,
+  limit = env.TRANSCRIPT_CANDIDATE_LIMIT,
 ): ChannelVideo[] {
-  return rankVideosByStrategy(videos, strategy).slice(0, limit);
+  return getTranscriptCandidateBatch(videos, strategy, 0, limit);
 }
-
-export const FALLBACK_SELECT_LIMIT = 10;
 
 export async function selectFallbackVideos(params: {
   creatorId: string;
   limit?: number;
 }): Promise<number> {
-  const { CreatorVideo } = await import("../../models/CreatorVideo.js");
+  const { creatorVideoRepository } = await import(
+    "../../repository/CreatorVideoRepository.js"
+  );
 
-  const limit = params.limit ?? FALLBACK_SELECT_LIMIT;
-  const videos = await CreatorVideo.find({
-    creatorId: params.creatorId,
-    "transcript.available": true,
-    "selection.selectedForPersona": false,
-  })
-    .sort({ "selection.rankScore": -1, "stats.viewCount": -1 })
-    .limit(limit);
-
-  for (const video of videos) {
-    video.selection.selectedForPersona = true;
-    video.selection.reason = "fallback_top_ranked";
-    await video.save();
-  }
-
-  return videos.length;
+  return creatorVideoRepository.selectFallbackVideos(
+    params.creatorId,
+    params.limit,
+  );
 }

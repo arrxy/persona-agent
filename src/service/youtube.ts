@@ -1,6 +1,7 @@
 import { YoutubeTranscript } from "youtube-transcript";
 import { creatorRequestRepository } from "../repository/CreatorRequestRepository.js";
 import { CreatorRequestStatus } from "../enums.js";
+import { CreatorRequest } from "../models/CreatorRequest.js";
 
 export interface TranscriptSegment {
   text: string;
@@ -140,5 +141,37 @@ export async function requestCreator({
   return creatorRequestRepository.create({
     userId,
     inputChannelUrl: channelUrl,
+  });
+}
+
+export async function requestCreatorReingest({
+  userId,
+  creatorId,
+  channelUrl,
+}: {
+  userId: string;
+  creatorId: string;
+  channelUrl: string;
+}) {
+  const activeReingest = await CreatorRequest.findOne({
+    creatorId,
+    reingest: true,
+    status: {
+      $in: [
+        CreatorRequestStatus.PENDING,
+        CreatorRequestStatus.PROCESSING,
+      ],
+    },
+  });
+
+  if (activeReingest) {
+    return activeReingest;
+  }
+
+  return creatorRequestRepository.create({
+    userId,
+    inputChannelUrl: channelUrl,
+    creatorId,
+    reingest: true,
   });
 }
