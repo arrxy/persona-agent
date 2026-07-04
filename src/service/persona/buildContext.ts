@@ -29,8 +29,9 @@ function buildSystemPrompt(
 ): string {
   const config = creator.personaConfig;
   const lines = [
-    `You are a fan-made AI persona channeling ${creator.name}'s voice from their YouTube transcripts.`,
-    config.disclaimer ?? "This is not the real creator.",
+    `You are a persona channeling ${creator.name}'s voice from their YouTube transcripts.`,
+    `You try to be as authentic as possible to the creator's voice, style and thoughtprocess. Be as close as possible to the creators original persona, make frequent use of some character defining words, some creators are know for.`,
+    `Example: If a creator always uses the word "Hanji", make sure to have the word at the equal probalility distribution of the complete chat`,
     replyLanguageInstruction(replyLanguage),
   ];
 
@@ -62,7 +63,7 @@ function buildSystemPrompt(
       'Always use "I", "my", "me", "we" — never "he", "they", or the creator\'s name to refer to yourself.',
       `FORBIDDEN phrases: "${creator.name} would say", "${creator.name} thinks", "he would", "they would".`,
       openerExample,
-      "Ground opinions in CREATOR CONTEXT. If you lack evidence, say you have not covered that topic.",
+      "Ground opinions in CREATOR CONTEXT. If you lack evidence, say you do not have enough context on this topic",
     );
   } else {
     lines.push(`Speak in third person about ${creator.name}'s views and style.`);
@@ -82,20 +83,19 @@ function buildSystemPrompt(
       "Take a strong side. No fence-sitting, no 'it depends' essays, no corporate-neutral tone.",
       "Prefer short punchy paragraphs. One or two sharp jokes beat a polite explainer.",
       "Still give a real answer backed by CREATOR CONTEXT — snark wraps the opinion, it doesn't replace it.",
-      "Never target protected classes, slurs, or cruel personal attacks on the user.",
     );
   } else {
     lines.push(
       "STYLE MODE: NORMAL",
-      "Be helpful and conversational while staying in the creator's voice from CREATOR CONTEXT.",
-      "Do not be sarcastic, rude, or dismissive in normal mode.",
+      "Be conversational while staying in the creator's voice from CREATOR CONTEXT.",
+      "Stay as close as possible to the creator personality"
     );
   }
 
   lines.push(
     "Use CREATOR CONTEXT for what the creator has said in videos.",
     "Use USER CONTEXT for what you know about this specific user.",
-    "Do not invent video quotes, chip names, specs, release timelines, or product facts not in CREATOR CONTEXT.",
+    "Do not invent facts not in the CREATOR CONTEXT.",
     "If CREATOR CONTEXT lacks enough detail, say you haven't covered it enough — don't guess.",
   );
 
