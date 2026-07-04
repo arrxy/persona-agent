@@ -13,6 +13,10 @@ import {
   type ReplyLanguage,
 } from "./language.js";
 
+const MIN_CONTEXT_CHUNKS = 4;
+const MIN_CONTEXT_MEMORIES = 1;
+const MIN_CONTEXT_TURNS = 2;
+
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
@@ -21,6 +25,7 @@ function buildSystemPrompt(
   creator: ICreatorDocument,
   replyLanguage: ReplyLanguage,
   mode: ConversationMode,
+  personaProfileBlock?: string,
 ): string {
   const config = creator.personaConfig;
   const lines = [
@@ -28,6 +33,10 @@ function buildSystemPrompt(
     config.disclaimer ?? "This is not the real creator.",
     replyLanguageInstruction(replyLanguage),
   ];
+
+  if (personaProfileBlock?.trim()) {
+    lines.push(personaProfileBlock.trim());
+  }
 
   if (config.identityPolicy.mustDiscloseFanMade) {
     lines.push(
@@ -122,6 +131,12 @@ function formatRecentTurns(messages: IMessageDocument[]): string {
   return `RECENT CONVERSATION:\n${lines.join("\n\n")}`;
 }
 
+export interface BuiltChatContext {
+  messages: ChatCompletionMessageParam[];
+  usedCreatorChunks: CreatorChunkHit[];
+  usedUserMemories: UserMemoryHit[];
+}
+
 export function buildChatMessages(params: {
   creator: ICreatorDocument;
   creatorChunks: CreatorChunkHit[];
@@ -129,7 +144,8 @@ export function buildChatMessages(params: {
   recentMessages: IMessageDocument[];
   userMessage: string;
   mode: ConversationMode;
-}): ChatCompletionMessageParam[] {
+  personaProfileBlock?: string;
+}): BuiltChatContext {
   const budget = env.CHAT_MAX_CONTEXT_TOKENS;
   const configuredLang = getCreatorReplyLanguage(
     params.creator.personaConfig.language,
@@ -146,6 +162,7 @@ export function buildChatMessages(params: {
     params.creator,
     replyLanguage,
     params.mode,
+    params.personaProfileBlock,
   );
 
   let chunks = [...params.creatorChunks];
@@ -181,12 +198,12 @@ export function buildChatMessages(params: {
   );
 
   while (totalTokens > budget) {
-    if (recent.length > 2) {
+    if (recent.length > MIN_CONTEXT_TURNS) {
       recent = recent.slice(2);
-    } else if (chunks.length > 2) {
-      chunks = chunks.slice(0, -1);
-    } else if (memories.length > 1) {
+    } else if (memories.length > MIN_CONTEXT_MEMORIES) {
       memories = memories.slice(0, -1);
+    } else if (chunks.length > MIN_CONTEXT_CHUNKS) {
+      chunks = chunks.slice(0, -1);
     } else {
       break;
     }
@@ -198,7 +215,7 @@ export function buildChatMessages(params: {
     );
   }
 
-  return messages;
+  return { messages, usedCreatorChunks: chunks, usedUserMemories: memories };
 }
 
 export function getChatTemperature(mode: ConversationMode): number {

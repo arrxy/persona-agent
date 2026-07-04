@@ -1,3 +1,4 @@
+import { env } from "../../config/env.js";
 import { Types } from "mongoose";
 import { TranscriptChunk } from "../../models/TranscriptChunk.js";
 import { embedTexts } from "../embedding.js";
@@ -22,7 +23,7 @@ export async function searchCreatorChunks(params: {
   query: string;
   topK?: number;
 }): Promise<CreatorChunkHit[]> {
-  const topK = params.topK ?? 8;
+  const topK = params.topK ?? env.CREATOR_RAG_TOP_K;
   const collectionName = getCreatorCollectionName(params.creatorId);
   const [queryVector] = await embedTexts([params.query]);
 
@@ -64,6 +65,13 @@ export async function searchCreatorChunks(params: {
       startSeconds: payload.startSeconds,
       endSeconds: payload.endSeconds,
     });
+  }
+
+  const minScore = env.CREATOR_RAG_MIN_SCORE;
+  const filtered = hits.filter((hit) => hit.score >= minScore);
+
+  if (filtered.length >= 2) {
+    return filtered;
   }
 
   return hits;

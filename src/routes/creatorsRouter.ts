@@ -2,9 +2,11 @@ import { Router } from "express";
 import {
   asyncHandler,
   authenticate,
+  type AuthenticatedRequest,
 } from "../middleware/auth.js";
 import { AppError } from "../utils/errors.js";
 import { Creator } from "../models/Creator.js";
+import { requestCreatorReingest } from "../service/youtube.js";
 
 const router = Router();
 
@@ -72,6 +74,27 @@ router.get(
       pinned: pinnedCreators.map(mapCreator),
       creators: exploreCreators.map(mapCreator),
     });
+  }),
+);
+
+router.post(
+  "/:creatorId/reingest",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const creator = await Creator.findById(req.params.creatorId).lean();
+
+    if (!creator?.channelUrl) {
+      throw new AppError(404, "Creator not found");
+    }
+
+    const userId = (req as AuthenticatedRequest).userId!;
+    const creatorRequest = await requestCreatorReingest({
+      userId,
+      creatorId: creator._id.toString(),
+      channelUrl: creator.channelUrl,
+    });
+
+    res.status(201).json({ creatorRequest });
   }),
 );
 

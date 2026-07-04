@@ -8,6 +8,7 @@ import { AppError } from "../../utils/errors.js";
 import { extractAndStoreMemories } from "../memory/extract.js";
 import { searchUserMemories } from "../memory/search.js";
 import { searchCreatorChunks } from "../qdrant/search.js";
+import { getPersonaProfilePromptBlock } from "../ingestion/personaProfile.js";
 import { buildChatMessages, getChatPromptVersion, getChatTemperature } from "./buildContext.js";
 
 const openai = new OpenAI({ apiKey: env.OPEN_AI_KEY });
@@ -104,31 +105,34 @@ export async function chatWithPersona(input: ChatInput): Promise<ChatResult> {
   const temperature = getChatTemperature(chatMode);
   const promptVersion = getChatPromptVersion(chatMode);
 
-  const [creatorChunks, userMemories, recentMessages] = await Promise.all([
-    searchCreatorChunks({
-      creatorId: input.creatorId,
-      query: input.message,
-      topK: env.CREATOR_RAG_TOP_K,
-    }),
-    searchUserMemories({
-      userId: input.userId,
-      creatorId: input.creatorId,
-      query: input.message,
-      topK: env.USER_MEMORY_TOP_K,
-    }),
-    Message.find({ conversationId: conversation._id })
-      .sort({ createdAt: -1 })
-      .limit(env.CHAT_SESSION_TURNS * 2)
-      .then((rows) => rows.reverse()),
-  ]);
+  const [creatorChunks, userMemories, recentMessages, personaProfileBlock] =
+    await Promise.all([
+      searchCreatorChunks({
+        creatorId: input.creatorId,
+        query: input.message,
+        topK: env.CREATOR_RAG_TOP_K,
+      }),
+      searchUserMemories({
+        userId: input.userId,
+        creatorId: input.creatorId,
+        query: input.message,
+        topK: env.USER_MEMORY_TOP_K,
+      }),
+      Message.find({ conversationId: conversation._id })
+        .sort({ createdAt: -1 })
+        .limit(env.CHAT_SESSION_TURNS * 2)
+        .then((rows) => rows.reverse()),
+      getPersonaProfilePromptBlock(input.creatorId),
+    ]);
 
-  const messages = buildChatMessages({
+  const { messages, usedCreatorChunks, usedUserMemories } = buildChatMessages({
     creator,
     creatorChunks,
     userMemories,
     recentMessages,
     userMessage: input.message,
     mode: chatMode,
+    personaProfileBlock,
   });
 
   const completion = await openai.chat.completions.create({
@@ -158,8 +162,8 @@ export async function chatWithPersona(input: ChatInput): Promise<ChatResult> {
     content: reply,
     retrieval: {
       query: input.message,
-      retrievedChunkIds: creatorChunks.map((chunk) => chunk.chunkId),
-      retrievedFactIds: userMemories.map((memory) => memory.memoryId),
+      retrievedChunkIds: usedCreatorChunks.map((chunk) => chunk.chunkId),
+      retrievedFactIds: usedUserMemories.map((memory) => memory.memoryId),
       modelUsed: env.CHAT_MODEL,
     },
     generation: {
@@ -182,14 +186,14 @@ export async function chatWithPersona(input: ChatInput): Promise<ChatResult> {
   });
 
   const sources: ChatSource[] = [
-    ...creatorChunks.map((chunk) => ({
+    ...usedCreatorChunks.map((chunk) => ({
       type: "transcript" as const,
       text: chunk.text,
       videoTitle: chunk.videoTitle,
       videoUrl: chunk.videoUrl,
       score: chunk.score,
     })),
-    ...userMemories.map((memory) => ({
+    ...usedUserMemories.map((memory) => ({
       type: "memory" as const,
       text: memory.text,
       score: memory.score,

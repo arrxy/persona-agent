@@ -8,6 +8,8 @@ import { CreatorRequestStatus } from "../enums.js";
 export interface CreateCreatorRequestInput {
   userId: Types.ObjectId | string;
   inputChannelUrl: string;
+  creatorId?: Types.ObjectId | string;
+  reingest?: boolean;
 }
 
 export interface ClaimCreatorRequestInput {
@@ -36,6 +38,8 @@ export class CreatorRequestRepository {
     return CreatorRequest.create({
       userId: input.userId,
       inputChannelUrl: input.inputChannelUrl,
+      ...(input.creatorId ? { creatorId: input.creatorId } : {}),
+      ...(input.reingest ? { reingest: true } : {}),
       status: CreatorRequestStatus.PENDING,
       processing: {
         attempts: 0,
@@ -216,6 +220,21 @@ export class CreatorRequestRepository {
 
     return CreatorRequest.findByIdAndUpdate(input.requestId, update, {
       returnDocument: "after",
+    });
+  }
+
+  async scheduleRetry(params: {
+    requestId: Types.ObjectId | string;
+    code: string;
+    message: string;
+    nextRetryAt: Date;
+  }): Promise<void> {
+    await CreatorRequest.findByIdAndUpdate(params.requestId, {
+      $set: {
+        status: CreatorRequestStatus.PENDING,
+        error: { code: params.code, message: params.message },
+        "processing.nextRetryAt": params.nextRetryAt,
+      },
     });
   }
 
