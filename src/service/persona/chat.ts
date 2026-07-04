@@ -1,9 +1,9 @@
 import { OpenAI } from "openai";
 import { env } from "../../config/env.js";
 import { ConversationMode, MessageRole } from "../../enums.js";
-import { Conversation } from "../../models/Conversation.js";
-import { Creator } from "../../models/Creator.js";
-import { Message } from "../../models/Message.js";
+import { conversationRepository } from "../../repository/ConversationRepository.js";
+import { creatorRepository } from "../../repository/CreatorRepository.js";
+import { messageRepository } from "../../repository/MessageRepository.js";
 import { AppError } from "../../utils/errors.js";
 import { extractAndStoreMemories } from "../memory/extract.js";
 import { searchUserMemories } from "../memory/search.js";
@@ -56,11 +56,10 @@ async function getOrCreateConversation(params: {
   mode: ConversationMode;
 }) {
   if (params.conversationId) {
-    const conversation = await Conversation.findOne({
-      _id: params.conversationId,
+    const conversation = await conversationRepository.findActiveForUser({
+      conversationId: params.conversationId,
       userId: params.userId,
       creatorId: params.creatorId,
-      deletedAt: null,
     });
 
     if (!conversation) {
@@ -69,13 +68,13 @@ async function getOrCreateConversation(params: {
 
     if (conversation.mode !== params.mode) {
       conversation.mode = params.mode;
-      await conversation.save();
+      await conversationRepository.save(conversation);
     }
 
     return conversation;
   }
 
-  return Conversation.create({
+  return conversationRepository.create({
     userId: params.userId,
     creatorId: params.creatorId,
     mode: params.mode,
@@ -86,7 +85,7 @@ async function getOrCreateConversation(params: {
 export async function chatWithPersona(input: ChatInput): Promise<ChatResult> {
   requireOpenAiKey();
 
-  const creator = await Creator.findById(input.creatorId);
+  const creator = await creatorRepository.findById(input.creatorId);
   if (!creator) {
     throw new AppError(404, "Creator not found");
   }
@@ -118,10 +117,10 @@ export async function chatWithPersona(input: ChatInput): Promise<ChatResult> {
         query: input.message,
         topK: env.USER_MEMORY_TOP_K,
       }),
-      Message.find({ conversationId: conversation._id })
-        .sort({ createdAt: -1 })
-        .limit(env.CHAT_SESSION_TURNS * 2)
-        .then((rows) => rows.reverse()),
+      messageRepository.findRecentByConversation(
+        conversation._id,
+        env.CHAT_SESSION_TURNS * 2,
+      ),
       getPersonaProfilePromptBlock(input.creatorId),
     ]);
 
@@ -146,7 +145,7 @@ export async function chatWithPersona(input: ChatInput): Promise<ChatResult> {
     throw new AppError(502, "Model returned an empty response");
   }
 
-  const userMessageDoc = await Message.create({
+  const userMessageDoc = await messageRepository.create({
     conversationId: conversation._id,
     creatorId: creator._id,
     userId: input.userId,
@@ -154,7 +153,7 @@ export async function chatWithPersona(input: ChatInput): Promise<ChatResult> {
     content: input.message,
   });
 
-  const assistantMessageDoc = await Message.create({
+  const assistantMessageDoc = await messageRepository.create({
     conversationId: conversation._id,
     creatorId: creator._id,
     userId: input.userId,

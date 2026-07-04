@@ -1,6 +1,6 @@
 import { env } from "../../config/env.js";
 import { Types } from "mongoose";
-import { TranscriptChunk } from "../../models/TranscriptChunk.js";
+import { transcriptChunkRepository } from "../../repository/TranscriptChunkRepository.js";
 import { embedTexts } from "../embedding.js";
 import type { QdrantChunkPayload } from "./collections.js";
 import { getCreatorCollectionName } from "./collections.js";
@@ -46,11 +46,13 @@ export async function searchCreatorChunks(params: {
     const payload = result.payload;
     if (!payload?.text) continue;
 
-    const chunk = await TranscriptChunk.findOne({
-      creatorId: params.creatorId,
-      youtubeVideoId: payload.youtubeVideoId,
-      chunkIndex: payload.chunkIndex,
-    });
+    const chunk = await transcriptChunkRepository.findByCreatorYoutubeChunkIndex(
+      {
+        creatorId: params.creatorId,
+        youtubeVideoId: payload.youtubeVideoId,
+        chunkIndex: payload.chunkIndex,
+      },
+    );
 
     if (!chunk) continue;
 

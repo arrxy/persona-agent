@@ -1,10 +1,17 @@
-import { type Types } from "mongoose";
+import { Types, type AnyBulkWriteOperation } from "mongoose";
 import { env } from "../config/env.js";
 import { VideoProcessingStatus } from "../enums.js";
 import {
   CreatorVideo,
   type ICreatorVideoDocument,
 } from "../models/CreatorVideo.js";
+import type { ChannelVideo } from "../service/youtube/channel.js";
+
+export interface SelectedPersonaVideoSummary {
+  _id: Types.ObjectId;
+  youtubeVideoId: string;
+  title: string;
+}
 
 export class CreatorVideoRepository {
   async findByCreatorAndYoutubeVideoId(
@@ -105,6 +112,72 @@ export class CreatorVideoRepository {
 
     const language = rows[0]?._id;
     return typeof language === "string" ? language : undefined;
+  }
+
+  async findSelectedWithTranscriptForPersona(
+    creatorId: Types.ObjectId | string,
+    limit = 12,
+  ): Promise<SelectedPersonaVideoSummary[]> {
+    return CreatorVideo.find({
+      creatorId,
+      "selection.selectedForPersona": true,
+      "transcript.available": true,
+    })
+      .sort({ "selection.rankScore": -1, "stats.viewCount": -1 })
+      .limit(limit)
+      .select("_id youtubeVideoId title")
+      .lean();
+  }
+
+  async findReadyForEmbedding(
+    creatorId: Types.ObjectId | string,
+  ): Promise<ICreatorVideoDocument[]> {
+    return CreatorVideo.find({
+      creatorId,
+      "selection.selectedForPersona": true,
+      "transcript.available": true,
+      "processing.status": VideoProcessingStatus.TRANSCRIPT_FETCHED,
+    });
+  }
+
+  async bulkUpsertFromChannelVideos(
+    creatorId: Types.ObjectId | string,
+    normalizedChannelId: string,
+    videos: ChannelVideo[],
+  ): Promise<void> {
+    if (videos.length === 0) return;
+
+    const operations = videos.map((video) => ({
+      updateOne: {
+        filter: {
+          creatorId,
+          youtubeVideoId: video.youtubeVideoId,
+        },
+        update: {
+          $set: {
+            channelId: normalizedChannelId,
+            url: video.url,
+            title: video.title,
+            description: video.description,
+            publishedAt: video.publishedAt,
+            durationSeconds: video.durationSeconds,
+            stats: video.stats,
+          },
+          $setOnInsert: {
+            creatorId,
+            youtubeVideoId: video.youtubeVideoId,
+            transcript: { available: false },
+            selection: { selectedForPersona: false },
+            processing: { status: VideoProcessingStatus.PENDING },
+          },
+        },
+        upsert: true,
+      },
+    }));
+
+    await CreatorVideo.bulkWrite(
+      operations as AnyBulkWriteOperation<ICreatorVideoDocument>[],
+    );
   }
 
   async selectFallbackVideos(

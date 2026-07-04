@@ -3,7 +3,8 @@ import { OAuth2Client } from "google-auth-library";
 import { randomUUID } from "node:crypto";
 import { env } from "../config/env.js";
 import { redis } from "../config/redis.js";
-import { User, type IUserDocument } from "../models/User.js";
+import type { IUserDocument } from "../models/User.js";
+import { userRepository } from "../repository/UserRepository.js";
 import { AuthProvider } from "../enums.js";
 import { AppError } from "../utils/errors.js";
 
@@ -81,12 +82,12 @@ export class AuthService {
   }): Promise<{ user: PublicUser; tokens: AuthTokens }> {
     const email = input.email.trim().toLowerCase();
 
-    const existing = await User.findOne({ email });
+    const existing = await userRepository.findByEmail(email);
     if (existing) {
       throw new AppError(409, "An account with this email already exists");
     }
 
-    const user = await User.create({
+    const user = await userRepository.create({
       email,
       password: input.password,
       name: input.name.trim(),
@@ -103,7 +104,7 @@ export class AuthService {
   }): Promise<{ user: PublicUser; tokens: AuthTokens }> {
     const email = input.email.trim().toLowerCase();
 
-    const user = await User.findOne({ email }).select("+password");
+    const user = await userRepository.findByEmailWithPassword(email);
     if (!user || !user.password) {
       throw new AppError(401, "Invalid email or password");
     }
@@ -138,9 +139,7 @@ export class AuthService {
     }
 
     const email = payload.email.toLowerCase();
-    let user = await User.findOne({
-      $or: [{ googleId: payload.sub }, { email }],
-    });
+    let user = await userRepository.findByGoogleIdOrEmail(payload.sub, email);
 
     if (user) {
       if (!user.googleId) {
@@ -149,10 +148,10 @@ export class AuthService {
         if (payload.picture && !user.avatarUrl) {
           user.avatarUrl = payload.picture;
         }
-        await user.save();
+        await userRepository.save(user);
       }
     } else {
-      user = await User.create({
+      user = await userRepository.create({
         email,
         name: payload.name ?? email.split("@")[0],
         googleId: payload.sub,
@@ -186,7 +185,7 @@ export class AuthService {
       throw new AppError(401, "Refresh token has been revoked");
     }
 
-    const user = await User.findById(payload.sub);
+    const user = await userRepository.findById(payload.sub);
     if (!user) {
       throw new AppError(401, "User not found");
     }
@@ -212,7 +211,7 @@ export class AuthService {
   }
 
   static async getUserById(userId: string): Promise<PublicUser> {
-    const user = await User.findById(userId);
+    const user = await userRepository.findById(userId);
     if (!user) {
       throw new AppError(404, "User not found");
     }

@@ -1,9 +1,12 @@
 import { OpenAI } from "openai";
 import { env } from "../../config/env.js";
 import type { ICreatorDocument } from "../../models/Creator.js";
-import { CreatorPersonaProfile } from "../../models/CreatorPersonaProfile.js";
-import { CreatorVideo } from "../../models/CreatorVideo.js";
-import { TranscriptChunk } from "../../models/TranscriptChunk.js";
+import {
+  creatorPersonaProfileRepository,
+  type CreatorPersonaProfileRecord,
+} from "../../repository/CreatorPersonaProfileRepository.js";
+import { creatorVideoRepository } from "../../repository/CreatorVideoRepository.js";
+import { transcriptChunkRepository } from "../../repository/TranscriptChunkRepository.js";
 
 const openai = new OpenAI({ apiKey: env.OPEN_AI_KEY });
 
@@ -41,9 +44,7 @@ function requireOpenAiKey(): void {
   }
 }
 
-type StoredPersonaProfile = NonNullable<
-  Awaited<ReturnType<typeof loadCreatorPersonaProfile>>
->;
+type StoredPersonaProfile = CreatorPersonaProfileRecord;
 
 function formatProfileForPrompt(profile: StoredPersonaProfile | null): string {
   if (!profile) return "";
@@ -104,9 +105,7 @@ function formatProfileForPrompt(profile: StoredPersonaProfile | null): string {
 }
 
 export async function loadCreatorPersonaProfile(creatorId: string) {
-  return CreatorPersonaProfile.findOne({ creatorId })
-    .sort({ version: -1 })
-    .lean();
+  return creatorPersonaProfileRepository.findLatestByCreatorId(creatorId);
 }
 
 export async function getPersonaProfilePromptBlock(
@@ -121,27 +120,19 @@ export async function buildCreatorPersonaProfile(
 ): Promise<void> {
   requireOpenAiKey();
 
-  const selectedVideos = await CreatorVideo.find({
-    creatorId: creator._id,
-    "selection.selectedForPersona": true,
-    "transcript.available": true,
-  })
-    .sort({ "selection.rankScore": -1, "stats.viewCount": -1 })
-    .limit(12)
-    .select("_id youtubeVideoId title")
-    .lean();
+  const selectedVideos =
+    await creatorVideoRepository.findSelectedWithTranscriptForPersona(
+      creator._id,
+    );
 
   if (selectedVideos.length === 0) return;
 
   const videoIds = selectedVideos.map((video) => video._id);
-  const chunks = await TranscriptChunk.find({
-    creatorId: creator._id,
-    videoId: { $in: videoIds },
-  })
-    .sort({ "quality.hasGoodSignal": -1 })
-    .limit(PROFILE_SAMPLE_CHUNKS)
-    .select("text videoId")
-    .lean();
+  const chunks = await transcriptChunkRepository.findProfileSampleChunks(
+    creator._id,
+    videoIds,
+    PROFILE_SAMPLE_CHUNKS,
+  );
 
   if (chunks.length === 0) return;
 
@@ -155,21 +146,8 @@ export async function buildCreatorPersonaProfile(
     sampleText += line;
   }
 
-  const transcriptSeconds = await CreatorVideo.aggregate([
-    {
-      $match: {
-        creatorId: creator._id,
-        "selection.selectedForPersona": true,
-        "transcript.available": true,
-      },
-    },
-    {
-      $group: {
-        _id: null,
-        totalSeconds: { $sum: "$transcript.totalSeconds" },
-      },
-    },
-  ]).then((rows) => rows[0]?.totalSeconds ?? 0);
+  const transcriptSeconds =
+    await creatorVideoRepository.sumSelectedTranscriptSeconds(creator._id);
 
   const response = await openai.chat.completions.create({
     model: env.CHAT_MODEL,
@@ -214,47 +192,39 @@ Ground everything in the excerpts. Keep lists short and specific.`,
   }
 
   const latestVersion =
-    (await CreatorPersonaProfile.findOne({ creatorId: creator._id })
-      .sort({ version: -1 })
-      .select("version")
-      .lean())?.version ?? 0;
+    await creatorPersonaProfileRepository.getLatestVersion(creator._id);
 
-  await CreatorPersonaProfile.findOneAndUpdate(
-    { creatorId: creator._id, version: latestVersion + 1 },
-    {
-      creatorId: creator._id,
-      version: latestVersion + 1,
-      summary: parsed.summary,
-      speakingStyle: {
-        tone: parsed.speakingStyle?.tone ?? [],
-        pacing: parsed.speakingStyle?.pacing,
-        vocabulary: parsed.speakingStyle?.vocabulary ?? [],
-        humorStyle: parsed.speakingStyle?.humorStyle,
-        commonPhrases: parsed.speakingStyle?.commonPhrases ?? [],
-        rhetoricalPatterns: parsed.speakingStyle?.rhetoricalPatterns ?? [],
-      },
-      beliefsAndOpinions: (parsed.beliefsAndOpinions ?? []).map((item) => ({
-        topic: item.topic,
-        stance: item.stance,
-        confidence: item.confidence ?? 0.5,
-        evidenceChunkIds: [],
-      })),
-      interests: (parsed.interests ?? []).map((item) => ({
-        topic: item.topic,
-        weight: item.weight ?? 0.5,
-        evidenceChunkIds: [],
-      })),
-      doAndDont: {
-        shouldDo: parsed.doAndDont?.shouldDo ?? [],
-        shouldAvoid: parsed.doAndDont?.shouldAvoid ?? [],
-      },
-      sampleResponses: [],
-      generatedFrom: {
-        videoIds,
-        chunkCount: chunks.length,
-        transcriptHours: transcriptSeconds / 3600,
-      },
+  await creatorPersonaProfileRepository.upsert({
+    creatorId: creator._id,
+    version: latestVersion + 1,
+    summary: parsed.summary,
+    speakingStyle: {
+      tone: parsed.speakingStyle?.tone ?? [],
+      pacing: parsed.speakingStyle?.pacing,
+      vocabulary: parsed.speakingStyle?.vocabulary ?? [],
+      humorStyle: parsed.speakingStyle?.humorStyle,
+      commonPhrases: parsed.speakingStyle?.commonPhrases ?? [],
+      rhetoricalPatterns: parsed.speakingStyle?.rhetoricalPatterns ?? [],
     },
-    { upsert: true, new: true },
-  );
+    beliefsAndOpinions: (parsed.beliefsAndOpinions ?? []).map((item) => ({
+      topic: item.topic,
+      stance: item.stance,
+      confidence: item.confidence ?? 0.5,
+      evidenceChunkIds: [],
+    })),
+    interests: (parsed.interests ?? []).map((item) => ({
+      topic: item.topic,
+      weight: item.weight ?? 0.5,
+      evidenceChunkIds: [],
+    })),
+    doAndDont: {
+      shouldDo: parsed.doAndDont?.shouldDo ?? [],
+      shouldAvoid: parsed.doAndDont?.shouldAvoid ?? [],
+    },
+    generatedFrom: {
+      videoIds,
+      chunkCount: chunks.length,
+      transcriptHours: transcriptSeconds / 3600,
+    },
+  });
 }

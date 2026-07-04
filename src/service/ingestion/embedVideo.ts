@@ -2,7 +2,8 @@ import { VideoProcessingStatus } from "../../enums.js";
 import { env } from "../../config/env.js";
 import type { ICreatorDocument } from "../../models/Creator.js";
 import type { ICreatorVideoDocument } from "../../models/CreatorVideo.js";
-import { TranscriptChunk } from "../../models/TranscriptChunk.js";
+import { creatorVideoRepository } from "../../repository/CreatorVideoRepository.js";
+import { transcriptChunkRepository } from "../../repository/TranscriptChunkRepository.js";
 import { chunkTranscriptSegments } from "../chunking.js";
 import { embedTexts } from "../embedding.js";
 import type { TranscriptSegment } from "../youtube.js";
@@ -24,11 +25,11 @@ export async function embedVideoTranscript(params: {
 
   if (drafts.length === 0) {
     video.processing = { status: VideoProcessingStatus.EMBEDDED };
-    await video.save();
+    await creatorVideoRepository.save(video);
     return 0;
   }
 
-  await TranscriptChunk.deleteMany({ videoId: video._id });
+  await transcriptChunkRepository.deleteByVideoId(video._id);
 
   const vectors = await embedTexts(drafts.map((draft) => draft.text));
   const language =
@@ -79,29 +80,25 @@ export async function embedVideoTranscript(params: {
   }
 
   video.processing = { status: VideoProcessingStatus.CHUNKED };
-  await video.save();
+  await creatorVideoRepository.save(video);
 
-  const insertedChunks = await TranscriptChunk.insertMany(chunkDocs);
+  const insertedChunks = await transcriptChunkRepository.insertMany(chunkDocs);
   const collectionName = await upsertChunkPoints(creatorId, points);
   const indexedAt = new Date();
 
   await Promise.all(
     insertedChunks.map((chunk, index) =>
-      TranscriptChunk.findByIdAndUpdate(chunk._id, {
-        $set: {
-          qdrant: {
-            collectionName,
-            pointId: points[index]!.pointId,
-            vectorModel: env.EMBEDDING_MODEL,
-            indexedAt,
-          },
-        },
+      transcriptChunkRepository.updateQdrantMetadata(chunk._id, {
+        collectionName,
+        pointId: points[index]!.pointId,
+        vectorModel: env.EMBEDDING_MODEL,
+        indexedAt,
       }),
     ),
   );
 
   video.processing = { status: VideoProcessingStatus.EMBEDDED };
-  await video.save();
+  await creatorVideoRepository.save(video);
 
   return drafts.length;
 }
@@ -109,15 +106,11 @@ export async function embedVideoTranscript(params: {
 export async function embedSelectedCreatorVideos(
   creator: ICreatorDocument,
 ): Promise<number> {
-  const { CreatorVideo } = await import("../../models/CreatorVideo.js");
   const { getYoutubeTranscript } = await import("../youtube.js");
 
-  const videos = await CreatorVideo.find({
-    creatorId: creator._id,
-    "selection.selectedForPersona": true,
-    "transcript.available": true,
-    "processing.status": VideoProcessingStatus.TRANSCRIPT_FETCHED,
-  });
+  const videos = await creatorVideoRepository.findReadyForEmbedding(
+    creator._id,
+  );
 
   let totalChunks = 0;
 

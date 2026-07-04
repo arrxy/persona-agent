@@ -1,7 +1,7 @@
 import { Types } from "mongoose";
 import { OpenAI } from "openai";
 import { env } from "../../config/env.js";
-import { UserMemory } from "../../models/UserMemory.js";
+import { userMemoryRepository } from "../../repository/UserMemoryRepository.js";
 import { embedTexts } from "../embedding.js";
 import { deletePoints } from "../qdrant/client.js";
 import { searchPoints } from "../qdrant/client.js";
@@ -99,24 +99,23 @@ async function enforceMemoryCap(params: {
   userId: string;
   creatorId: string;
 }): Promise<void> {
-  const count = await UserMemory.countDocuments({
-    userId: params.userId,
-    creatorId: params.creatorId,
-  });
+  const count = await userMemoryRepository.countByUserAndCreator(
+    params.userId,
+    params.creatorId,
+  );
 
   const overflow = count - env.USER_MEMORY_MAX_PER_SCOPE + 1;
   if (overflow <= 0) return;
 
-  const oldest = await UserMemory.find({
-    userId: params.userId,
-    creatorId: params.creatorId,
-  })
-    .sort({ createdAt: 1 })
-    .limit(overflow);
+  const oldest = await userMemoryRepository.findOldest(
+    params.userId,
+    params.creatorId,
+    overflow,
+  );
 
   const pointIds = oldest.map((memory) => memory.qdrant.pointId);
   await deletePoints(USER_MEMORY_COLLECTION, pointIds);
-  await UserMemory.deleteMany({ _id: { $in: oldest.map((m) => m._id) } });
+  await userMemoryRepository.deleteByIds(oldest.map((m) => m._id));
 }
 
 async function storeFact(params: {
@@ -145,7 +144,7 @@ async function storeFact(params: {
     creatorId: params.creatorId,
   });
 
-  const memory = await UserMemory.create({
+  const memory = await userMemoryRepository.create({
     userId: params.userId,
     creatorId: params.creatorId,
     conversationId: params.conversationId,
@@ -170,7 +169,7 @@ async function storeFact(params: {
 
   memory.qdrant.pointId = pointId;
   memory.qdrant.indexedAt = new Date();
-  await memory.save();
+  await userMemoryRepository.save(memory);
 }
 
 export async function extractAndStoreMemories(params: {

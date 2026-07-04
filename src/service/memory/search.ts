@@ -1,6 +1,6 @@
 import { Types } from "mongoose";
 import { env } from "../../config/env.js";
-import { UserMemory } from "../../models/UserMemory.js";
+import { userMemoryRepository } from "../../repository/UserMemoryRepository.js";
 import { embedTexts } from "../embedding.js";
 import {
   scopeFilter,
@@ -45,7 +45,7 @@ export async function searchUserMemories(params: {
     const payload = result.payload;
     if (!payload?.memoryId || !payload.text) continue;
 
-    const memory = await UserMemory.findById(payload.memoryId);
+    const memory = await userMemoryRepository.findById(payload.memoryId);
     if (!memory) continue;
 
     hits.push({

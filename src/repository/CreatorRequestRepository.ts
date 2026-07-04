@@ -79,6 +79,18 @@ export class CreatorRequestRepository {
     });
   }
 
+  async findActiveReingest(
+    creatorId: Types.ObjectId | string,
+  ): Promise<ICreatorRequestDocument | null> {
+    return CreatorRequest.findOne({
+      creatorId,
+      reingest: true,
+      status: {
+        $in: [CreatorRequestStatus.PENDING, CreatorRequestStatus.PROCESSING],
+      },
+    });
+  }
+
   async findByCreatorId(
     creatorId: Types.ObjectId | string,
     limit = 20,
