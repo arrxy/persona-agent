@@ -215,7 +215,10 @@ async function apiFetch<T>(
   return data as T;
 }
 
-export async function fetchAuthConfig(): Promise<{ googleClientId: string }> {
+export async function fetchAuthConfig(): Promise<{
+  googleClientId: string;
+  emailPasswordAuthEnabled: boolean;
+}> {
   return apiFetch("/auth/config");
 }
 

@@ -1,5 +1,5 @@
 // /api/v1/auth
-import { Router } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
 import { env } from "../config/env.js";
 import { AuthService } from "../service/auth.js";
 import {
@@ -12,8 +12,23 @@ import { AppError } from "../utils/errors.js";
 const router = Router();
 
 router.get("/config", (_req, res) => {
-  res.status(200).json({ googleClientId: env.GOOGLE_CLIENT_ID });
+  res.status(200).json({
+    googleClientId: env.GOOGLE_CLIENT_ID,
+    emailPasswordAuthEnabled: env.EMAIL_PASSWORD_AUTH_ENABLED,
+  });
 });
+
+function requireEmailPasswordAuth(
+  _req: Request,
+  _res: Response,
+  next: NextFunction,
+): void {
+  if (!env.EMAIL_PASSWORD_AUTH_ENABLED) {
+    next(new AppError(403, "Email and password sign-in is disabled"));
+    return;
+  }
+  next();
+}
 
 function validateEmail(email: unknown): string {
   if (typeof email !== "string" || !email.includes("@")) {
@@ -38,6 +53,7 @@ function validateName(name: unknown): string {
 
 router.post(
   "/register",
+  requireEmailPasswordAuth,
   asyncHandler(async (req, res) => {
     const email = validateEmail(req.body.email);
     const password = validatePassword(req.body.password);
@@ -50,6 +66,7 @@ router.post(
 
 router.post(
   "/login",
+  requireEmailPasswordAuth,
   asyncHandler(async (req, res) => {
     const email = validateEmail(req.body.email);
     const password = validatePassword(req.body.password);

@@ -9,6 +9,12 @@ function required(name: string): string {
   return value;
 }
 
+function optionalBoolean(name: string, defaultValue: boolean): boolean {
+  const value = process.env[name];
+  if (value === undefined || value === "") return defaultValue;
+  return value === "true" || value === "1";
+}
+
 export const env = {
   PORT: Number(process.env.PORT) || 3000,
   OPEN_AI_KEY: process.env.OPEN_AI_KEY,
@@ -17,6 +23,10 @@ export const env = {
   JWT_SECRET: required("JWT_SECRET"),
   JWT_REFRESH_SECRET: required("JWT_REFRESH_SECRET"),
   GOOGLE_CLIENT_ID: required("GOOGLE_CLIENT_ID"),
+  EMAIL_PASSWORD_AUTH_ENABLED: optionalBoolean(
+    "EMAIL_PASSWORD_AUTH_ENABLED",
+    false,
+  ),
   ACCESS_TOKEN_EXPIRY: process.env.ACCESS_TOKEN_EXPIRY ?? "15m",
   REFRESH_TOKEN_EXPIRY: process.env.REFRESH_TOKEN_EXPIRY ?? "7d",
   YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY,
