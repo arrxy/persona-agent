@@ -103,6 +103,68 @@ function getTokens(): AuthTokens | null {
   return raw ? (JSON.parse(raw) as AuthTokens) : null;
 }
 
+function saveTokens(tokens: AuthTokens): void {
+  localStorage.setItem("tokens", JSON.stringify(tokens));
+}
+
+export class AuthError extends Error {
+  constructor(message = "Session expired") {
+    super(message);
+    this.name = "AuthError";
+  }
+}
+
+type AuthExpiredListener = () => void;
+const authExpiredListeners = new Set<AuthExpiredListener>();
+
+export function onAuthExpired(listener: AuthExpiredListener): () => void {
+  authExpiredListeners.add(listener);
+  return () => authExpiredListeners.delete(listener);
+}
+
+function notifyAuthExpired(): void {
+  clearAuth();
+  for (const listener of authExpiredListeners) {
+    listener();
+  }
+}
+
+const AUTH_NO_REFRESH_PATHS = [
+  "/auth/login",
+  "/auth/register",
+  "/auth/google",
+  "/auth/refresh",
+];
+
+function shouldAttemptRefresh(path: string): boolean {
+  return !AUTH_NO_REFRESH_PATHS.some((authPath) => path.startsWith(authPath));
+}
+
+let refreshPromise: Promise<AuthTokens | null> | null = null;
+
+async function refreshTokens(): Promise<AuthTokens | null> {
+  const tokens = getTokens();
+  if (!tokens?.refreshToken) return null;
+
+  try {
+    const response = await fetch(`${API}/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken: tokens.refreshToken }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) return null;
+
+    const nextTokens = data.tokens as AuthTokens;
+    if (!nextTokens?.accessToken || !nextTokens?.refreshToken) return null;
+
+    saveTokens(nextTokens);
+    return nextTokens;
+  } catch {
+    return null;
+  }
+}
+
 export function clearAuth(): void {
   localStorage.removeItem("tokens");
   localStorage.removeItem("user");
@@ -116,6 +178,7 @@ export function getStoredUser(): User | null {
 async function apiFetch<T>(
   path: string,
   options: RequestInit = {},
+  retried = false,
 ): Promise<T> {
   const tokens = getTokens();
   const headers: Record<string, string> = {
@@ -131,13 +194,31 @@ async function apiFetch<T>(
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
+    if (response.status === 401 && shouldAttemptRefresh(path)) {
+      if (!retried && tokens?.refreshToken) {
+        refreshPromise ??= refreshTokens().finally(() => {
+          refreshPromise = null;
+        });
+        const nextTokens = await refreshPromise;
+        if (nextTokens) {
+          return apiFetch<T>(path, options, true);
+        }
+      }
+
+      notifyAuthExpired();
+      throw new AuthError();
+    }
+
     throw new Error(data.error ?? `Request failed (${response.status})`);
   }
 
   return data as T;
 }
 
-export async function fetchAuthConfig(): Promise<{ googleClientId: string }> {
+export async function fetchAuthConfig(): Promise<{
+  googleClientId: string;
+  emailPasswordAuthEnabled: boolean;
+}> {
   return apiFetch("/auth/config");
 }
 

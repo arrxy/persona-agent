@@ -2,9 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { fetchAuthConfig, login, loginWithGoogle, register } from "../api";
 import type { User } from "../api";
 
-/** Temporary — remove when Google sign-in is stable in production */
-const EMAIL_PASSWORD_AUTH_ENABLED = true;
-
 interface AuthPageProps {
   onSuccess: (user: User) => void;
 }
@@ -38,12 +35,17 @@ export default function AuthPage({ onSuccess }: AuthPageProps) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [googleClientId, setGoogleClientId] = useState<string | null>(null);
+  const [emailPasswordAuthEnabled, setEmailPasswordAuthEnabled] =
+    useState(false);
   const googleWrapRef = useRef<HTMLDivElement>(null);
   const googleButtonRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     void fetchAuthConfig()
-      .then((config) => setGoogleClientId(config.googleClientId))
+      .then((config) => {
+        setGoogleClientId(config.googleClientId);
+        setEmailPasswordAuthEnabled(config.emailPasswordAuthEnabled);
+      })
       .catch(() => {
         /* Google sign-in stays hidden if config fails */
       });
@@ -172,7 +174,7 @@ export default function AuthPage({ onSuccess }: AuthPageProps) {
           <p className="auth-subtitle">Sign-in is temporarily unavailable.</p>
         )}
 
-        {EMAIL_PASSWORD_AUTH_ENABLED && (
+        {emailPasswordAuthEnabled && (
           <>
             {googleClientId && (
               <div className="auth-divider">
@@ -245,7 +247,7 @@ export default function AuthPage({ onSuccess }: AuthPageProps) {
           </>
         )}
 
-        {!EMAIL_PASSWORD_AUTH_ENABLED && error && (
+        {!emailPasswordAuthEnabled && error && (
           <p className="error">{error}</p>
         )}
       </main>

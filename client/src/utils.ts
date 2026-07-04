@@ -58,13 +58,12 @@ export function getCreatorRequestStatusLabel(
 ): string {
   switch (status) {
     case "pending":
-      return "Queued";
     case "processing":
-      return "Adding…";
+      return "Requested";
     case "failed":
       return "Failed";
     default:
-      return "Adding…";
+      return "Requested";
   }
 }
 

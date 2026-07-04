@@ -1,9 +1,9 @@
 import { env } from "../../config/env.js";
 
-export interface QdrantSearchResult<TPayload = Record<string, unknown>> {
+export interface QdrantSearchResult<T = Record<string, unknown>> {
   id: string | number;
   score: number;
-  payload?: TPayload;
+  payload?: T;
 }
 
 function getBaseUrl(): string {
@@ -36,9 +36,13 @@ export async function qdrantFetch<T>(
 }
 
 export async function ensureCollection(collectionName: string): Promise<void> {
-  const data = await qdrantFetch<{
-    result: { collections: { name: string }[] };
-  }>("/collections");
+  const data: {
+    result: { 
+      collections: {
+        name: string 
+      }[] 
+    }
+  } = await qdrantFetch("/collections");
 
   const exists = data.result.collections.some(
     (collection) => collection.name === collectionName,
@@ -57,12 +61,12 @@ export async function ensureCollection(collectionName: string): Promise<void> {
   }
 }
 
-export async function searchPoints<TPayload = Record<string, unknown>>(params: {
+export async function searchPoints<T = Record<string, unknown>>(params: {
   collectionName: string;
   vector: number[];
   limit: number;
   filter?: Record<string, unknown>;
-}): Promise<QdrantSearchResult<TPayload>[]> {
+}): Promise<QdrantSearchResult<T>[]> {
   const body: Record<string, unknown> = {
     vector: params.vector,
     limit: params.limit,
@@ -74,7 +78,7 @@ export async function searchPoints<TPayload = Record<string, unknown>>(params: {
   }
 
   const data = await qdrantFetch<{
-    result: QdrantSearchResult<TPayload>[];
+    result: QdrantSearchResult<T>[];
   }>(`/collections/${params.collectionName}/points/search`, {
     method: "POST",
     body: JSON.stringify(body),
