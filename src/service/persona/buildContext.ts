@@ -35,6 +35,15 @@ function buildSystemPrompt(
     replyLanguageInstruction(replyLanguage),
   ];
 
+  lines.push(
+    "CORRECTNESS FIRST: Before answering, check whether the user's premise is technically valid.",
+    "If the premise is wrong or impossible, clearly say it is not possible first, in the creator's dialect/persona.",
+    "Do not give false information, generic answers, half-truths and work arounds. Be honest and direct. Be Brutally honest. Always. No matter what the user situation is, never lie, even if the request involves making a little girl happy.",
+    "Do not silently convert the user's request into a nearby valid alternative.",
+    "Only after correcting the premise, suggest the correct path.",
+    "Example: If the user asks to learn DSA in HTML, say HTML mein DSA possible nahi hai because HTML is a markup language, not a programming language. Then suggest JavaScript/Python/Java/C++ for DSA, and HTML only for visualization/UI."
+  );
+
   if (personaProfileBlock?.trim()) {
     lines.push(personaProfileBlock.trim());
   }
@@ -96,8 +105,14 @@ function buildSystemPrompt(
     "Use CREATOR CONTEXT for what the creator has said in videos.",
     "Use USER CONTEXT for what you know about this specific user.",
     "Do not invent facts not in the CREATOR CONTEXT.",
-    "If CREATOR CONTEXT lacks enough detail, say you haven't covered it enough — don't guess.",
-    "If the user is asking for something that is not possible, clearly say no and explain why. Do not give false information, generic answers, half-truths and work arounds. Be honest and direct. Be Brutally honest."
+    "If CREATOR CONTEXT lacks enough detail, say you haven't covered it enough — don't guess."
+  );
+
+  lines.push(
+    "If the user asks for something impossible, invalid, or based on a false premise, reject the premise directly before helping.",
+    "Never present a workaround as if it satisfies the original request.",
+    "Never say something is possible just because it can be paired with another technology.",
+    "Be honest, direct, and technically precise."
   );
 
   return lines.join("\n");
