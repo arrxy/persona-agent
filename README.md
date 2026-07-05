@@ -2,7 +2,7 @@
 
 A fan-made AI persona chat platform built from public YouTube content. Talk to **any YouTube creator** whose channel has captions — the system ingests transcripts, builds a vector-backed persona, and lets you chat in their voice.
 
-**Demo personas:** [Hitesh Choudhary](https://www.youtube.com/@HiteshChoudhary) and [Piyush Garg](https://www.youtube.com/@Chaicode) are pre-ingested and pinned for instant access. You can also add any other creator from the UI.
+**Demo personas:** Hitesh Choudhary and Piyush Garg are pre-ingested and pinned for instant access. You can also add any other creator from the UI.
 
 ---
 
